@@ -1,6 +1,7 @@
 /* ── Config ─────────────────────────────────────────────────────── */
-// Your Mac mini's Tailscale IP + the API port from mac-api/server.py
-const API_BASE    = 'http://100.77.158.48:9000';
+// Your Mac mini's Tailscale HTTPS address + API port
+// Must be HTTPS — browsers block http:// fetches from https:// GitHub Pages pages
+const API_BASE    = 'https://my-biggest-beefsteak.tail437237.ts.net:9000';
 const API_TIMEOUT = 5000; // ms before declaring API unreachable
 
 /* ── Theme Toggle ───────────────────────────────────────────────── */
