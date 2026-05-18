@@ -136,6 +136,16 @@ main {
   color: var(--warning);
   border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
 }
+.badge-live {
+  background: color-mix(in srgb, var(--online) 18%, transparent);
+  color: var(--online);
+  border: 1px solid color-mix(in srgb, var(--online) 35%, transparent);
+}
+.badge-error {
+  background: color-mix(in srgb, var(--offline) 18%, transparent);
+  color: var(--offline);
+  border: 1px solid color-mix(in srgb, var(--offline) 35%, transparent);
+}
 
 /* ── Card Grid ─────────────────────────────────────────────────── */
 .cards-grid {

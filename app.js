@@ -1,3 +1,8 @@
+/* ── Config ─────────────────────────────────────────────────────── */
+// Your Mac mini's Tailscale IP + the API port from mac-api/server.py
+const API_BASE    = 'http://100.77.158.48:9000';
+const API_TIMEOUT = 5000; // ms before declaring API unreachable
+
 /* ── Theme Toggle ───────────────────────────────────────────────── */
 const body       = document.body;
 const themeBtn   = document.getElementById('theme-toggle');
@@ -8,7 +13,6 @@ function applyTheme(dark) {
   themeIcon.textContent = dark ? '☀️' : '🌙';
 }
 
-// Restore saved preference (default: dark)
 const saved = localStorage.getItem('theme');
 const isDark = saved !== null ? saved === 'dark' : true;
 applyTheme(isDark);
@@ -20,9 +24,6 @@ themeBtn.addEventListener('click', () => {
 });
 
 /* ── Helpers ────────────────────────────────────────────────────── */
-function rand(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
 
 function setBar(barId, pct) {
   const bar = document.getElementById(barId);
@@ -32,122 +33,173 @@ function setBar(barId, pct) {
   bar.classList.toggle('critical', pct >= 85);
 }
 
-function now() {
+function nowTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-/* ── Mac Mini Mock Stats ────────────────────────────────────────── */
-function updateStats() {
-  const cpu  = rand(8, 72);
-  const ram  = rand(40, 82);
-  const disk = rand(55, 78);
-  const temp = rand(38, 61);
-  const netTx = rand(10, 450);
-  const netRx = rand(20, 900);
+function fmtUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600)  / 60);
+  const s = seconds % 60;
+  return `${d}d ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
 
+/* ── Badge helpers ──────────────────────────────────────────────── */
+function setBadgeLive(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = 'Live';
+  el.classList.remove('badge-mock', 'badge-error');
+  el.classList.add('badge-live');
+}
+
+function setBadgeError(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = "Can't connect";
+  el.classList.remove('badge-mock', 'badge-live');
+  el.classList.add('badge-error');
+}
+
+/* ── API fetch with timeout ─────────────────────────────────────── */
+async function apiFetch(path) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch {
+    clearTimeout(timer);
+    return null; // null = use mock
+  }
+}
+
+/* ── Render stats (shared by real + mock) ───────────────────────── */
+function renderStats({ cpu, ram, disk, uptime, net_tx, net_rx, temp }) {
   document.getElementById('stat-cpu').textContent  = cpu + '%';
   document.getElementById('stat-ram').textContent  = ram + '%';
   document.getElementById('stat-disk').textContent = disk + '%';
-  document.getElementById('stat-temp').textContent = temp + '°C';
-  document.getElementById('stat-net').textContent  = `↑${netTx} ↓${netRx} KB/s`;
-
+  document.getElementById('stat-temp').textContent = temp != null ? temp + '°C' : 'N/A';
+  document.getElementById('stat-net').textContent  = `↑${net_tx} ↓${net_rx} KB/s`;
+  document.getElementById('stat-uptime').textContent = fmtUptime(uptime);
   setBar('bar-cpu',  cpu);
   setBar('bar-ram',  ram);
   setBar('bar-disk', disk);
-
-  updateUptime();
 }
 
-// Simulate a plausible uptime that ticks
-let uptimeSeconds = rand(3600 * 24 * 2, 3600 * 24 * 14); // 2–14 days base
+/* ── Stats — real API ───────────────────────────────────────────── */
+let uptimeOffset = 0; // incremented by ticker between API polls
 
-function updateUptime() {
-  uptimeSeconds++;
-  const d = Math.floor(uptimeSeconds / 86400);
-  const h = Math.floor((uptimeSeconds % 86400) / 3600);
-  const m = Math.floor((uptimeSeconds % 3600)  / 60);
-  const s = uptimeSeconds % 60;
-  document.getElementById('stat-uptime').textContent =
-    `${d}d ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+async function fetchAndRenderStats() {
+  const data = await apiFetch('/api/stats');
+  if (data) {
+    uptimeOffset = 0;
+    renderStats(data);
+    setBadgeLive('badge-mac');
+    return true;
+  }
+  return false;
 }
 
-// Update stats on load, then every 5 seconds
-updateStats();
-setInterval(updateStats,  5000);
-setInterval(updateUptime, 1000);
-
-/* ── Server Status Mock ─────────────────────────────────────────── */
-const serverIds = ['immich', 'openclaw', 'projects', 'proto', 'tailscale'];
-
-function updateLastChecked() {
-  const t = now();
-  serverIds.forEach(id => {
-    const el = document.getElementById(`lc-${id}`);
-    if (el) el.textContent = `Checked ${t}`;
+/* ── Stats — error state ────────────────────────────────────────── */
+function renderStatsError() {
+  ['stat-cpu', 'stat-ram', 'stat-disk', 'stat-temp', 'stat-net', 'stat-uptime'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = '—'; el.style.color = 'var(--offline)'; }
   });
+  ['bar-cpu', 'bar-ram', 'bar-disk'].forEach(id => {
+    const bar = document.getElementById(id);
+    if (bar) { bar.style.width = '0%'; }
+  });
+  setBadgeError('badge-mac');
 }
 
-updateLastChecked();
-setInterval(updateLastChecked, 30000);
+/* ── Stats boot ─────────────────────────────────────────────────── */
+let usingRealStats = false;
 
-/* ── Log Data ───────────────────────────────────────────────────── */
-const LOG_TEMPLATES = {
-  immich: [
-    ['INFO',  'Server started on port 2283'],
-    ['INFO',  'Connected to PostgreSQL database'],
-    ['INFO',  'Asset upload from 192.168.1.5 — 14.2 MB'],
-    ['INFO',  'Thumbnail generation completed — 34 assets'],
-    ['DEBUG', 'Machine learning pipeline initialized'],
-    ['INFO',  'Face detection job queued — 8 items'],
-    ['INFO',  'Smart album "Last Month" updated — 127 photos'],
-    ['WARN',  'Storage usage at 74% — consider cleanup'],
-    ['INFO',  'User session started from 100.64.x.x'],
-    ['DEBUG', 'EXIF extraction completed for batch #42'],
-    ['INFO',  'Library scan finished — 0 new assets'],
-    ['INFO',  'Backup sync to external drive complete'],
-    ['DEBUG', 'Redis cache hit ratio: 91.3%'],
-    ['INFO',  'Cleanup job removed 12 temporary files'],
-    ['WARN',  'Slow query detected: 340ms on asset lookup'],
-  ],
-  openclaw: [
-    ['INFO',  'Dashboard loaded — 5 services registered'],
-    ['INFO',  'Health check: all services responding'],
-    ['DEBUG', 'Fetched Docker stats for 3 containers'],
-    ['INFO',  'New deployment triggered: immich v1.101.0'],
-    ['INFO',  'Deployment complete in 42s'],
-    ['WARN',  'Container "proto-app" restarted — exit code 1'],
-    ['INFO',  'CPU alert threshold set to 80%'],
-    ['DEBUG', 'Webhook received from GitHub Actions'],
-    ['INFO',  'Log archive rotation completed'],
-    ['ERROR', 'Failed to pull image: timeout after 30s'],
-    ['INFO',  'Retry succeeded on second attempt'],
-    ['DEBUG', 'Port scan: all bound ports healthy'],
-  ],
-  projects: [
-    ['INFO',  'Nginx reloaded — config applied'],
-    ['INFO',  'TLS certificate valid until 2025-12-01'],
-    ['INFO',  'GET / 200 12ms from 100.64.x.x'],
-    ['INFO',  'GET /api/health 200 4ms'],
-    ['DEBUG', 'Static asset cache warm — 98% hit'],
-    ['INFO',  'Deploy hook received — pulling latest main'],
-    ['INFO',  'Build completed in 18s'],
-    ['INFO',  'Site restarted successfully'],
-    ['WARN',  'Rate limit exceeded for /api/submit — throttled'],
-    ['INFO',  'Scheduled backup completed'],
-  ],
-  proto: [
-    ['INFO',  'Dev server started on port 4000'],
-    ['WARN',  'Experimental feature flag enabled: ai-mode'],
-    ['DEBUG', 'Hot reload triggered — 3 modules updated'],
-    ['ERROR', 'Unhandled exception in /api/test — NullRef'],
-    ['INFO',  'Exception captured and logged'],
-    ['WARN',  'Memory usage spike: 680 MB'],
-    ['DEBUG', 'WebSocket connection opened from localhost'],
-    ['INFO',  'Test suite ran — 47 passed, 2 failed'],
-    ['WARN',  'Deprecated API usage detected in utils.js'],
-    ['INFO',  'Auto-restarted after crash'],
-  ],
-};
+(async () => {
+  usingRealStats = await fetchAndRenderStats();
+  if (!usingRealStats) renderStatsError();
+})();
+
+// Uptime ticker — only runs when real stats are live
+setInterval(() => {
+  if (usingRealStats) {
+    uptimeOffset++;
+    const el = document.getElementById('stat-uptime');
+    if (el && el._baseUptime != null) {
+      el.textContent = fmtUptime(el._baseUptime + uptimeOffset);
+    }
+  }
+}, 1000);
+
+// Stats refresh every 5s
+setInterval(async () => {
+  const ok = await fetchAndRenderStats();
+  usingRealStats = ok;
+  if (!ok) renderStatsError();
+}, 5000);
+
+/* ── Server Status — real API ───────────────────────────────────── */
+async function fetchAndRenderServices() {
+  const data = await apiFetch('/api/services');
+  if (!data) return false;
+
+  const idMap = { immich: 'immich', openclaw: 'openclaw', projects: 'projects', proto: 'proto' };
+  const t = nowTime();
+
+  data.forEach(svc => {
+    const lcEl = document.getElementById(`lc-${svc.id}`);
+    if (lcEl) lcEl.textContent = `Checked ${t}`;
+
+    // Find the status badge inside the server card
+    // Cards are matched by finding server-name text
+    document.querySelectorAll('.server-card').forEach(card => {
+      const nameEl = card.querySelector('.server-name');
+      if (!nameEl) return;
+      // Match by service id → name mapping
+      const cardSvcId = Object.entries(idMap).find(([id]) => id === svc.id)?.[0];
+      if (!cardSvcId) return;
+      if (card.querySelector(`#lc-${cardSvcId}`) === null) return;
+
+      const badge = card.querySelector('.status-badge');
+      if (!badge) return;
+      badge.className = `status-badge ${svc.online ? 'online' : 'offline'}`;
+      badge.textContent = svc.online ? 'Online' : 'Offline';
+    });
+  });
+
+  setBadgeLive('badge-servers');
+  return true;
+}
+
+function renderServicesError() {
+  const t = nowTime();
+  ['immich', 'openclaw', 'projects', 'proto', 'tailscale'].forEach(id => {
+    const lcEl = document.getElementById(`lc-${id}`);
+    if (lcEl) lcEl.textContent = `Failed ${t}`;
+  });
+  document.querySelectorAll('.server-card .status-badge').forEach(badge => {
+    badge.className = 'status-badge offline';
+    badge.textContent = 'Offline';
+  });
+  setBadgeError('badge-servers');
+}
+
+// Boot
+(async () => {
+  const ok = await fetchAndRenderServices();
+  if (!ok) renderServicesError();
+})();
+
+// Refresh every 30s
+setInterval(async () => {
+  const ok = await fetchAndRenderServices();
+  if (!ok) renderServicesError();
+}, 30000);
 
 /* ── Log Viewer ─────────────────────────────────────────────────── */
 const logViewer  = document.getElementById('log-viewer');
@@ -155,50 +207,47 @@ const logSelect  = document.getElementById('log-server');
 const logRefresh = document.getElementById('log-refresh');
 const logFollow  = document.getElementById('log-follow');
 
-function randomPastTime(maxSecondsAgo = 600) {
-  const d = new Date(Date.now() - rand(0, maxSecondsAgo) * 1000);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function buildLog(server) {
-  const templates = LOG_TEMPLATES[server] || LOG_TEMPLATES.immich;
-  // Pick a random subset and shuffle to simulate realistic log ordering
-  const count = rand(10, templates.length);
-  const picked = [...templates].sort(() => Math.random() - 0.5).slice(0, count);
-  // Sort by a fake timestamp
-  const entries = picked.map(([level, msg]) => ({
-    time: randomPastTime(),
-    level,
-    msg,
-  }));
-  return entries;
-}
-
-function renderLog(server) {
-  const entries = buildLog(server);
-  logViewer.innerHTML = entries.map(({ time, level, msg }) => `
+function renderLogLines(lines) {
+  if (!lines.length) {
+    logViewer.innerHTML = '<div class="log-line"><span class="log-msg" style="color:var(--text-muted)">No log lines available.</span></div>';
+    return;
+  }
+  logViewer.innerHTML = lines.map(({ time, level, msg }) => `
     <div class="log-line">
-      <span class="log-time">${time}</span>
-      <span class="log-level ${level}">${level}</span>
-      <span class="log-msg">${msg}</span>
+      <span class="log-time">${time ?? '——'}</span>
+      <span class="log-level ${level ?? 'INFO'}">${level ?? 'INFO'}</span>
+      <span class="log-msg">${msg ?? ''}</span>
     </div>
   `).join('');
+  if (logFollow.checked) logViewer.scrollTop = logViewer.scrollHeight;
+}
 
-  if (logFollow.checked) {
-    logViewer.scrollTop = logViewer.scrollHeight;
+async function fetchAndRenderLogs(server) {
+  const data = await apiFetch(`/api/logs?service=${server}&lines=50`);
+  if (data && data.lines && data.lines.length > 0) {
+    renderLogLines(data.lines);
+    setBadgeLive('badge-logs');
+    return true;
+  }
+  return false;
+}
+
+async function refreshLog() {
+  const server = logSelect.value;
+  const ok = await fetchAndRenderLogs(server);
+  if (!ok) {
+    logViewer.innerHTML = `
+      <div class="log-line">
+        <span class="log-level ERROR">ERROR</span>
+        <span class="log-msg" style="color:var(--offline)">Can't connect to API — make sure the Mac mini is reachable over Tailscale and the server is running.</span>
+      </div>`;
+    setBadgeError('badge-logs');
   }
 }
 
 // Initial render
-renderLog(logSelect.value);
+refreshLog();
 
-// Server switch
-logSelect.addEventListener('change', () => renderLog(logSelect.value));
-
-// Refresh button
-logRefresh.addEventListener('click', () => renderLog(logSelect.value));
-
-// Auto-refresh every 10 s (simulates streaming)
-setInterval(() => {
-  renderLog(logSelect.value);
-}, 10000);
+logSelect.addEventListener('change', refreshLog);
+logRefresh.addEventListener('click', refreshLog);
+setInterval(refreshLog, 10000);
