@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="dark">
+
+  <!-- ── Header ───────────────────────────────────────────────── -->
+  <header>
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-icon">⌂</span>
+        <h1>My Dashboard</h1>
+      </div>
+      <button id="theme-toggle" aria-label="Toggle theme" title="Toggle light / dark mode">
+        <span id="theme-icon">☀️</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ── Project Links ─────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">
+        <span class="section-icon">🔗</span> Projects &amp; Services
+      </h2>
+      <div class="cards-grid">
+
+        <a class="card project-card" href="http://100.77.158.48:2283" target="_blank" rel="noopener">
+          <div class="card-icon">📷</div>
+          <div class="card-body">
+            <div class="card-name">Immich (Private)</div>
+            <div class="card-desc">Self-hosted photo &amp; video library</div>
+          </div>
+          <span class="status-dot online" title="Status placeholder"></span>
+        </a>
+
+        <a class="card project-card" href="https://my-biggest-beefsteak.tail437237.ts.net" target="_blank" rel="noopener">
+          <div class="card-icon">🐾</div>
+          <div class="card-body">
+            <div class="card-name">OpenClaw (Private)</div>
+            <div class="card-desc">Server management dashboard</div>
+          </div>
+          <span class="status-dot online" title="Status placeholder"></span>
+        </a>
+
+        <a class="card project-card" href="https://dao-xuan-thinh.github.io/Study-Portal/" target="_blank" rel="noopener">
+          <div class="card-icon">🌐</div>
+          <div class="card-body">
+            <div class="card-name">Study Portal (Public)</div>
+            <div class="card-desc">Production &amp; staging sites</div>
+          </div>
+          <span class="status-dot online" title="Status placeholder"></span>
+        </a>
+
+        <a class="card project-card" href="https://my-biggest-beefsteak.tail437237.ts.net:10000/" target="_blank" rel="noopener">
+          <div class="card-icon">🧪</div>
+          <div class="card-body">
+            <div class="card-name">Prototype (Public)</div>
+            <div class="card-desc">Experimental &amp; WIP builds</div>
+          </div>
+          <span class="status-dot online" title="Status placeholder"></span>
+        </a>
+
+        <a class="card project-card" href="https://dao-xuan-thinh.github.io/Simple-StandBy/" target="_blank" rel="noopener">
+          <div class="card-icon">:3</div>
+          <div class="card-body">
+            <div class="card-name">Standby (Public)</div>
+            <div class="card-desc">Simple standby website for iPad and other devices</div>
+          </div>
+          <span class="status-dot online" title="Status placeholder"></span>
+        </a>
+
+      </div>
+    </section>
+
+    <!-- ── Mac Mini Status ───────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">
+        <span class="section-icon">🖥️</span> Mac Mini Status
+        <span class="badge badge-mock">Mock Data</span>
+      </h2>
+      <div class="cards-grid stats-grid">
+
+        <div class="card stat-card">
+          <div class="stat-label">CPU Usage</div>
+          <div class="stat-value" id="stat-cpu">—</div>
+          <div class="stat-bar-wrap"><div class="stat-bar" id="bar-cpu"></div></div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-label">RAM Usage</div>
+          <div class="stat-value" id="stat-ram">—</div>
+          <div class="stat-bar-wrap"><div class="stat-bar" id="bar-ram"></div></div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-label">Disk Usage</div>
+          <div class="stat-value" id="stat-disk">—</div>
+          <div class="stat-bar-wrap"><div class="stat-bar" id="bar-disk"></div></div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-label">Uptime</div>
+          <div class="stat-value uptime" id="stat-uptime">—</div>
+          <div class="stat-sub">Mac mini M2 · macOS Sonoma</div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-label">CPU Temp</div>
+          <div class="stat-value" id="stat-temp">—</div>
+          <div class="stat-sub">Average across cores</div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-label">Network</div>
+          <div class="stat-value" id="stat-net">—</div>
+          <div class="stat-sub">Tailscale connected</div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── Server Status ─────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">
+        <span class="section-icon">📡</span> Server Status
+        <span class="badge badge-mock">Mock Data</span>
+      </h2>
+      <div class="cards-grid server-grid">
+
+        <div class="card server-card">
+          <div class="server-info">
+            <span class="server-name">Immich</span>
+            <span class="server-detail">:2283</span>
+          </div>
+          <div class="server-meta">
+            <span class="status-badge online">Online</span>
+            <span class="last-checked" id="lc-immich">checking…</span>
+          </div>
+        </div>
+
+        <div class="card server-card">
+          <div class="server-info">
+            <span class="server-name">OpenClaw</span>
+            <span class="server-detail">:3000</span>
+          </div>
+          <div class="server-meta">
+            <span class="status-badge online">Online</span>
+            <span class="last-checked" id="lc-openclaw">checking…</span>
+          </div>
+        </div>
+
+        <div class="card server-card">
+          <div class="server-info">
+            <span class="server-name">Project Sites</span>
+            <span class="server-detail">:8080</span>
+          </div>
+          <div class="server-meta">
+            <span class="status-badge online">Online</span>
+            <span class="last-checked" id="lc-projects">checking…</span>
+          </div>
+        </div>
+
+        <div class="card server-card">
+          <div class="server-info">
+            <span class="server-name">Prototypes</span>
+            <span class="server-detail">:4000</span>
+          </div>
+          <div class="server-meta">
+            <span class="status-badge warning">Degraded</span>
+            <span class="last-checked" id="lc-proto">checking…</span>
+          </div>
+        </div>
+
+        <div class="card server-card">
+          <div class="server-info">
+            <span class="server-name">Tailscale</span>
+            <span class="server-detail">VPN tunnel</span>
+          </div>
+          <div class="server-meta">
+            <span class="status-badge online">Connected</span>
+            <span class="last-checked" id="lc-tailscale">checking…</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── Log Viewer ────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">
+        <span class="section-icon">📋</span> Logs
+        <span class="badge badge-mock">Mock Data</span>
+      </h2>
+      <div class="log-controls">
+        <select id="log-server" aria-label="Select server">
+          <option value="immich">Immich</option>
+          <option value="openclaw">OpenClaw</option>
+          <option value="projects">Project Sites</option>
+          <option value="proto">Prototypes</option>
+        </select>
+        <button id="log-refresh" title="Refresh logs">↻ Refresh</button>
+        <label class="log-follow-wrap">
+          <input type="checkbox" id="log-follow" checked />
+          <span>Auto-scroll</span>
+        </label>
+      </div>
+      <div class="log-viewer" id="log-viewer" aria-live="polite" aria-label="Server logs">
+        <!-- Populated by app.js -->
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>Hosted on <a href="https://pages.github.com" target="_blank" rel="noopener">GitHub Pages</a> · Connected via Tailscale</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
