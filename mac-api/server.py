@@ -57,6 +57,12 @@ ALLOWED_ORIGINS = [
     "null",  # file:// access during local dev
 ]
 
+# ── Token Auth ────────────────────────────────────────────────────────────────
+# All /api/* requests must include ?token=<API_TOKEN> in the query string.
+# Change this to any long random string. Keep it private.
+# Generate a new one with: python3 -c "import secrets; print(secrets.token_hex(24))"
+API_TOKEN = "3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80"
+
 # Per-service config.
 # "docker"   : Docker container name (use `docker ps` to find it). Set to None to skip.
 # "log_file" : Absolute path to a log file. Used if docker is None or docker logs fail.
@@ -285,6 +291,13 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/")
         qs = parse_qs(parsed.query)
 
+        # Token check on all /api/* routes
+        if path.startswith("/api/"):
+            token = qs.get("token", [None])[0]
+            if token != API_TOKEN:
+                json_response(self, {"error": "Unauthorized"}, 401)
+                return
+
         if path == "/api/stats":
             try:
                 data = get_stats()
@@ -339,9 +352,13 @@ if __name__ == "__main__":
         print(f"       then move the .crt/.key files to your home directory (~/).")
 
     print(f"Mac Mini Stats API running on port {PORT} ({scheme})")
-    print(f"  Stats:    {scheme}://{TAILSCALE_HOSTNAME}:{PORT}/api/stats")
-    print(f"  Services: {scheme}://{TAILSCALE_HOSTNAME}:{PORT}/api/services")
-    print(f"  Logs:     {scheme}://{TAILSCALE_HOSTNAME}:{PORT}/api/logs?service=immich&lines=50")
+    print(f"  API token: {API_TOKEN}")
+    print(f"  Stats:    {scheme}://{TAILSCALE_HOSTNAME}:{PORT}/api/stats?token={API_TOKEN}")
+    print(f"  Services: {scheme}://{TAILSCALE_HOSTNAME}:{PORT}/api/services?token={API_TOKEN}")
+    print(f"  Logs:     {scheme}://{TAILSCALE_HOSTNAME}:{PORT}/api/logs?service=immich&lines=50&token={API_TOKEN}")
+    print(f"")
+    print(f"  Public URL (via Tailscale Funnel):")
+    print(f"  https://{TAILSCALE_HOSTNAME}/api/stats?token={API_TOKEN}")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()

@@ -1,7 +1,7 @@
 /* ── Config ─────────────────────────────────────────────────────── */
-// Your Mac mini's Tailscale HTTPS address + API port
-// Must be HTTPS — browsers block http:// fetches from https:// GitHub Pages pages
-const API_BASE    = 'https://my-biggest-beefsteak.tail437237.ts.net:9000';
+// Public URL via Tailscale Funnel — no port needed (Funnel maps :443 → :9000)
+const API_BASE    = 'https://my-biggest-beefsteak.tail437237.ts.net';
+const API_TOKEN   = '3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80';
 const API_TIMEOUT = 5000; // ms before declaring API unreachable
 
 /* ── Theme Toggle ───────────────────────────────────────────────── */
@@ -65,16 +65,19 @@ function setBadgeError(id) {
 
 /* ── API fetch with timeout ─────────────────────────────────────── */
 async function apiFetch(path) {
+  // Append token — works whether path already has query params or not
+  const sep = path.includes('?') ? '&' : '?';
+  const url = `${API_BASE}${path}${sep}token=${API_TOKEN}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), API_TIMEOUT);
   try {
-    const res = await fetch(`${API_BASE}${path}`, { signal: controller.signal });
+    const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timer);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch {
     clearTimeout(timer);
-    return null; // null = use mock
+    return null;
   }
 }
 
