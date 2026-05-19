@@ -357,8 +357,8 @@ if __name__ == "__main__":
     print(f"  Services: {scheme}://{TAILSCALE_HOSTNAME}:{PORT}/api/services?token={API_TOKEN}")
     print(f"  Logs:     {scheme}://{TAILSCALE_HOSTNAME}:{PORT}/api/logs?service=immich&lines=50&token={API_TOKEN}")
     print(f"")
-    print(f"  Public URL (via Tailscale Funnel):")
-    print(f"  https://{TAILSCALE_HOSTNAME}/api/stats?token={API_TOKEN}")
+    print(f"  Public URL (via Tailscale Funnel on :8443):")
+    print(f"  https://{TAILSCALE_HOSTNAME}:8443/api/stats?token={API_TOKEN}")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()

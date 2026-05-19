@@ -1,6 +1,6 @@
 /* ── Config ─────────────────────────────────────────────────────── */
-// Public URL via Tailscale Funnel — no port needed (Funnel maps :443 → :9000)
-const API_BASE    = 'https://my-biggest-beefsteak.tail437237.ts.net';
+// Public URL via Tailscale Funnel on port 8443
+const API_BASE    = 'https://my-biggest-beefsteak.tail437237.ts.net:8443';
 const API_TOKEN   = '3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80';
 const API_TIMEOUT = 5000; // ms before declaring API unreachable
 
