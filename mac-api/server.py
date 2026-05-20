@@ -98,40 +98,86 @@ SERVICES = {
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+import re
+
+def get_temp_powermetrics():
+    """
+    Read CPU die temperature via powermetrics (macOS only).
+    Requires passwordless sudo for powermetrics. One-time setup:
+        sudo sh -c 'echo "ALL ALL=(ALL) NOPASSWD: /usr/bin/powermetrics" > /etc/sudoers.d/powermetrics'
+    Returns float °C or None if unavailable.
+    """
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "powermetrics", "--samplers", "thermal", "-n", "1", "-i", "100"],
+            capture_output=True, text=True, timeout=5,
+        )
+        # Look for "CPU die temperature: 45.12 C"
+        m = re.search(r"CPU die temperature:\s*([\d.]+)", result.stdout)
+        if m:
+            return round(float(m.group(1)), 1)
+    except Exception:
+        pass
+    return None
+
+
 def get_stats():
     cpu = psutil.cpu_percent(interval=0.5)
     ram = psutil.virtual_memory()
+    swap = psutil.swap_memory()
     disk = psutil.disk_usage("/")
-    net_before = psutil.net_io_counters()
-    time.sleep(0.5)
-    net_after = psutil.net_io_counters()
 
-    net_tx = round((net_after.bytes_sent - net_before.bytes_sent) / 1024, 1)  # KB/s
-    net_rx = round((net_after.bytes_recv - net_before.bytes_recv) / 1024, 1)
+    disk_before = psutil.disk_io_counters()
+    net_before  = psutil.net_io_counters()
+    time.sleep(0.5)
+    disk_after  = psutil.disk_io_counters()
+    net_after   = psutil.net_io_counters()
+
+    net_tx = round((net_after.bytes_sent  - net_before.bytes_sent)  / 1024, 1)  # KB/s
+    net_rx = round((net_after.bytes_recv  - net_before.bytes_recv)  / 1024, 1)
+    disk_r = round((disk_after.read_bytes  - disk_before.read_bytes)  / 1024 / 1024, 2)  # MB/s
+    disk_w = round((disk_after.write_bytes - disk_before.write_bytes) / 1024 / 1024, 2)
 
     uptime_seconds = int(time.time() - psutil.boot_time())
 
-    # Temperature — best effort; macOS M-series often returns empty dict
-    temp = None
+    # CPU frequency (not always available on Apple Silicon)
+    cpu_freq = None
     try:
-        temps = psutil.sensors_temperatures()
-        if temps:
-            all_temps = [t.current for group in temps.values() for t in group]
-            if all_temps:
-                temp = round(sum(all_temps) / len(all_temps), 1)
-    except (AttributeError, NotImplementedError):
+        freq = psutil.cpu_freq()
+        if freq:
+            cpu_freq = round(freq.current / 1000, 2)  # GHz
+    except Exception:
         pass
 
+    # Temperature — try powermetrics first (Apple Silicon), fall back to psutil
+    temp = get_temp_powermetrics()
+    if temp is None:
+        try:
+            temps = psutil.sensors_temperatures()
+            if temps:
+                all_temps = [t.current for group in temps.values() for t in group]
+                if all_temps:
+                    temp = round(sum(all_temps) / len(all_temps), 1)
+        except (AttributeError, NotImplementedError):
+            pass
+
     return {
-        "cpu":    round(cpu, 1),
-        "ram":    round(ram.percent, 1),
-        "disk":   round(disk.percent, 1),
-        "uptime": uptime_seconds,
-        "net_tx": net_tx,
-        "net_rx": net_rx,
-        "temp":   temp,
-        "ram_used_gb":  round(ram.used / 1024**3, 2),
-        "ram_total_gb": round(ram.total / 1024**3, 2),
+        "cpu":          round(cpu, 1),
+        "ram":          round(ram.percent, 1),
+        "ram_used_gb":  round(ram.used   / 1024**3, 2),
+        "ram_total_gb": round(ram.total  / 1024**3, 2),
+        "swap":         round(swap.percent, 1),
+        "swap_used_gb": round(swap.used  / 1024**3, 2),
+        "disk":         round(disk.percent, 1),
+        "disk_used_gb": round(disk.used  / 1024**3, 1),
+        "disk_total_gb":round(disk.total / 1024**3, 1),
+        "disk_read_mbs": disk_r,
+        "disk_write_mbs":disk_w,
+        "uptime":       uptime_seconds,
+        "net_tx":       net_tx,
+        "net_rx":       net_rx,
+        "temp":         temp,
+        "cpu_freq_ghz": cpu_freq,
     }
 
 
@@ -338,7 +384,10 @@ class Handler(BaseHTTPRequestHandler):
 # ── Entry Point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    # Bind to 127.0.0.1 only — Tailscale Funnel connects from localhost,
+    # so this works for Funnel while blocking direct Tailscale-IP connections
+    # that would cause TLS handshake errors in the log.
+    server = HTTPServer(("127.0.0.1", PORT), Handler)
 
     print(f"Mac Mini Stats API running on port {PORT} (plain HTTP — TLS handled by Tailscale Funnel)")
     print(f"  API token: {API_TOKEN}")

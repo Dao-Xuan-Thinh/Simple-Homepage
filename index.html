@@ -60,6 +60,15 @@
         <a class="card project-card" href="https://my-biggest-beefsteak.tail437237.ts.net:10000/" target="_blank" rel="noopener">
           <div class="card-icon">🧪</div>
           <div class="card-body">
+            <div class="card-name">Prototype (Outdated)</div>
+            <div class="card-desc">Old Frame</div>
+          </div>
+          <span class="status-dot warning" title="Status placeholder"></span>
+        </a>
+
+        <a class="card project-card" href="https://my-biggest-beefsteak.tail437237.ts.net:5000/" target="_blank" rel="noopener">
+          <div class="card-icon">😿</div>
+          <div class="card-body">
             <div class="card-name">Prototype (Public)</div>
             <div class="card-desc">Experimental &amp; WIP builds</div>
           </div>
@@ -87,39 +96,55 @@
       <div class="cards-grid stats-grid">
 
         <div class="card stat-card">
-          <div class="stat-label">CPU Usage (Doesnt work for now)</div>
+          <div class="stat-label">CPU Usage</div>
           <div class="stat-value" id="stat-cpu">—</div>
           <div class="stat-bar-wrap"><div class="stat-bar" id="bar-cpu"></div></div>
+          <div class="stat-sub" id="stat-cpu-freq"></div>
         </div>
 
         <div class="card stat-card">
           <div class="stat-label">RAM Usage</div>
           <div class="stat-value" id="stat-ram">—</div>
           <div class="stat-bar-wrap"><div class="stat-bar" id="bar-ram"></div></div>
+          <div class="stat-sub" id="stat-ram-detail"></div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-label">Swap</div>
+          <div class="stat-value" id="stat-swap">—</div>
+          <div class="stat-bar-wrap"><div class="stat-bar" id="bar-swap"></div></div>
+          <div class="stat-sub" id="stat-swap-detail"></div>
         </div>
 
         <div class="card stat-card">
           <div class="stat-label">Disk Usage</div>
           <div class="stat-value" id="stat-disk">—</div>
           <div class="stat-bar-wrap"><div class="stat-bar" id="bar-disk"></div></div>
+          <div class="stat-sub" id="stat-disk-detail"></div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-label">Disk I/O</div>
+          <div class="stat-value" id="stat-diskio">—</div>
+          <div class="stat-sub">Read / Write per second</div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-label">CPU Temp</div>
+          <div class="stat-value" id="stat-temp">—</div>
+          <div class="stat-sub">via powermetrics · <a href="#" id="temp-help-link" style="color:var(--accent);font-size:.75rem">setup?</a></div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-label">Network</div>
+          <div class="stat-value" id="stat-net">—</div>
+          <div class="stat-sub">↑ Upload &nbsp;↓ Download (KB/s)</div>
         </div>
 
         <div class="card stat-card">
           <div class="stat-label">Uptime</div>
           <div class="stat-value uptime" id="stat-uptime">—</div>
           <div class="stat-sub">Mac mini M4 · macOS Tahoe 26.5</div>
-        </div>
-
-        <div class="card stat-card">
-          <div class="stat-label">CPU Temp</div>
-          <div class="stat-value" id="stat-temp">—</div>
-          <div class="stat-sub">Average across cores</div>
-        </div>
-
-        <div class="card stat-card">
-          <div class="stat-label">Network</div>
-          <div class="stat-value" id="stat-net">—</div>
-          <div class="stat-sub">Tailscale connected</div>
         </div>
 
       </div>
