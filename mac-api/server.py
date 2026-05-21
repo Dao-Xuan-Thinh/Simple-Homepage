@@ -11,11 +11,11 @@ Setup:
     python3 server.py
 
 Endpoints:
-    GET  /api/stats                           — CPU, RAM, Disk, uptime, network
-    GET  /api/services                        — live service + project status (cached)
-    GET  /api/config                          — full project/service config (read)
-    PUT  /api/config?token=<WRITE_TOKEN>      — update config (write, requires write token)
-    GET  /api/logs?service=<id>&lines=50      — last N log lines
+    GET  /api/stats                           - CPU, RAM, Disk, uptime, network
+    GET  /api/services                        - live service + project status (cached)
+    GET  /api/config                          - full project/service config (read)
+    PUT  /api/config?token=<WRITE_TOKEN>      - update config (write, requires write token)
+    GET  /api/logs?service=<id>&lines=50      - last N log lines
 
 CORS is pre-configured for dao-xuan-thinh.github.io and localhost.
 """
@@ -59,11 +59,11 @@ ALLOWED_ORIGINS = [
 ]
 
 # ── Token Auth ────────────────────────────────────────────────────────────────
-# READ token — required for all GET /api/* requests.
+# READ token - required for all GET /api/* requests.
 # This ends up in the public app.js on GitHub Pages (practical barrier, not secret).
 API_TOKEN = "3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80"
 
-# WRITE token — required for PUT /api/config (saving settings changes).
+# WRITE token - required for PUT /api/config (saving settings changes).
 # This is NOT stored in the frontend JS. Users must type it in the settings UI.
 # Change this to something secret: python3 -c "import secrets; print(secrets.token_hex(24))"
 WRITE_TOKEN = "set-a-secret-write-token-here"
@@ -78,7 +78,7 @@ _status_lock  = threading.Lock()
 # ── Config helpers ────────────────────────────────────────────────────────────
 
 def load_config():
-    """Load config.json. Returns the parsed dict (never raises — returns {} on error)."""
+    """Load config.json. Returns the parsed dict (never raises - returns {} on error)."""
     try:
         with _config_lock:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -101,7 +101,7 @@ def save_config(data):
 # ── Status checking ────────────────────────────────────────────────────────────
 
 def check_port(port):
-    """TCP connect to localhost:port — returns True if something is listening."""
+    """TCP connect to localhost:port - returns True if something is listening."""
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=2):
             return True
@@ -110,7 +110,7 @@ def check_port(port):
 
 
 def check_url_reachable(url, timeout=4):
-    """HTTP GET to url — returns True if we get any response (even 4xx/5xx)."""
+    """HTTP GET to url - returns True if we get any response (even 4xx/5xx)."""
     if not url:
         return False
     try:
@@ -121,7 +121,7 @@ def check_url_reachable(url, timeout=4):
         with urllib.request.urlopen(req, timeout=timeout, context=ctx):
             return True
     except urllib.error.HTTPError:
-        return True   # server replied — it's up
+        return True   # server replied - it's up
     except Exception:
         return False
 
@@ -250,7 +250,7 @@ def get_stats():
     except Exception:
         pass
 
-    # Temperature — try powermetrics first (Apple Silicon), fall back to psutil
+    # Temperature - try powermetrics first (Apple Silicon), fall back to psutil
     temp = get_temp_powermetrics()
     if temp is None:
         try:
@@ -351,9 +351,9 @@ def parse_log_line(line):
         level, msg = extract_level(rest)
         return {"time": ts_part, "level": level, "msg": msg or rest}
 
-    # Plain line — no timestamp
+    # Plain line - no timestamp
     level, msg = extract_level(line)
-    return {"time": "——", "level": level, "msg": msg or line}
+    return {"time": "--", "level": level, "msg": msg or line}
 
 
 LEVEL_KEYWORDS = {
@@ -404,7 +404,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         # Compact log format
-        print(f"[{self.log_date_time_string()}] {self.address_string()} — {fmt % args}")
+        print(f"[{self.log_date_time_string()}] {self.address_string()} - {fmt % args}")
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -442,7 +442,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/logs":
             service = qs.get("service", ["immich"])[0]
             lines = int(qs.get("lines", ["50"])[0])
-            lines = max(1, min(lines, 500))  # clamp 1–500
+            lines = max(1, min(lines, 500))  # clamp 1-500
             try:
                 data = get_logs(service, lines)
                 data["lines"] = [l for l in data.get("lines", []) if l]  # remove None
@@ -454,7 +454,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(b"Mac Mini Stats API — OK\n")
+            self.wfile.write(b"Mac Mini Stats API - OK\n")
 
         else:
             json_response(self, {"error": "Not found"}, 404)
@@ -467,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/config":
             token = qs.get("token", [None])[0]
             if token != WRITE_TOKEN:
-                json_response(self, {"error": "Unauthorized — write token required"}, 401)
+                json_response(self, {"error": "Unauthorized - write token required"}, 401)
                 return
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -493,11 +493,11 @@ class Handler(BaseHTTPRequestHandler):
 # ── Entry Point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Bind to 127.0.0.1 — Tailscale Funnel connects from localhost.
+    # Bind to 127.0.0.1 - Tailscale Funnel connects from localhost.
     # This blocks direct Tailscale-IP connections that cause TLS noise in the log.
     server = HTTPServer(("127.0.0.1", PORT), Handler)
 
-    print(f"Mac Mini Stats API running on port {PORT} (plain HTTP — TLS handled by Tailscale Funnel)")
+    print(f"Mac Mini Stats API running on port {PORT} (plain HTTP - TLS handled by Tailscale Funnel)")
     print(f"  API token:   {API_TOKEN}")
     print(f"  Write token: {WRITE_TOKEN}")
     print(f"  Local:    http://{TAILSCALE_HOSTNAME}:{PORT}/api/stats?token={API_TOKEN}")
