@@ -210,21 +210,36 @@ def status_refresh_loop():
 def get_temp_powermetrics():
     """
     Read CPU die temperature via powermetrics (macOS only).
+    Uses cpu_power sampler — the thermal sampler on Apple Silicon M4 only
+    reports pressure level (Nominal/Heavy), not actual temperatures.
+
     Requires passwordless sudo for powermetrics. One-time setup:
-        sudo sh -c 'echo "ALL ALL=(ALL) NOPASSWD: /usr/bin/powermetrics" > /etc/sudoers.d/powermetrics'
-    Returns float °C or None if unavailable.
+        sudo sh -c 'echo "spider ALL=(ALL) NOPASSWD: /usr/bin/powermetrics" > /etc/sudoers.d/powermetrics'
+    Returns float degrees C or None if unavailable.
     """
     try:
         result = subprocess.run(
-            ["sudo", "-n", "powermetrics", "--samplers", "thermal", "-n", "1", "-i", "100"],
-            capture_output=True, text=True, timeout=5,
+            ["sudo", "-n", "powermetrics", "--samplers", "cpu_power", "-n", "1", "-i", "100"],
+            capture_output=True, text=True, timeout=10,
         )
-        # Look for "CPU die temperature: 45.12 C"
-        m = re.search(r"CPU die temperature:\s*([\d.]+)", result.stdout)
-        if m:
-            return round(float(m.group(1)), 1)
-    except Exception:
-        pass
+        # Try patterns in priority order (Intel -> Apple Silicon variants)
+        patterns = [
+            r"CPU die temperature:\s*([\d.]+)",
+            r"Die Temperature:\s*([\d.]+)",
+            r"CPU temperature:\s*([\d.]+)",
+            r"temperature:\s*([\d.]+)",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, result.stdout, re.IGNORECASE)
+            if m:
+                return round(float(m.group(1)), 1)
+        if result.returncode != 0:
+            print(f"[temp] powermetrics error (rc={result.returncode}): {result.stderr.strip()[:200]}")
+        elif result.stdout:
+            # Show a snippet so we can adjust the pattern if needed
+            print(f"[temp] no temperature found; first 300 chars: {result.stdout[:300]!r}")
+    except Exception as exc:
+        print(f"[temp] exception: {exc}")
     return None
 
 
