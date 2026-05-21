@@ -207,39 +207,63 @@ def status_refresh_loop():
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def get_temp_powermetrics():
+def get_cpu_temp():
     """
-    Read CPU die temperature via powermetrics (macOS only).
-    Uses cpu_power sampler — the thermal sampler on Apple Silicon M4 only
-    reports pressure level (Nominal/Heavy), not actual temperatures.
+    Try to read CPU temperature.
+    1. osx-cpu-temp (Homebrew) — rejects 0.0 which it returns on M4
+    2. powermetrics cpu_power sampler — works on Intel Macs
+    Returns float degrees C or None if unavailable (e.g. Apple Silicon M4).
+    """
+    # Try osx-cpu-temp first (brew install osx-cpu-temp)
+    try:
+        result = subprocess.run(["osx-cpu-temp"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            m = re.search(r"([\d.]+)", result.stdout)
+            if m:
+                val = float(m.group(1))
+                if val > 0:  # 0.0 means the tool doesn't support this chip
+                    return round(val, 1)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
 
-    Requires passwordless sudo for powermetrics. One-time setup:
-        sudo sh -c 'echo "spider ALL=(ALL) NOPASSWD: /usr/bin/powermetrics" > /etc/sudoers.d/powermetrics'
-    Returns float degrees C or None if unavailable.
-    """
+    # Fall back to powermetrics (Intel Macs)
     try:
         result = subprocess.run(
             ["sudo", "-n", "powermetrics", "--samplers", "cpu_power", "-n", "1", "-i", "100"],
             capture_output=True, text=True, timeout=10,
         )
-        # Try patterns in priority order (Intel -> Apple Silicon variants)
-        patterns = [
+        for pattern in [
             r"CPU die temperature:\s*([\d.]+)",
             r"Die Temperature:\s*([\d.]+)",
             r"CPU temperature:\s*([\d.]+)",
-            r"temperature:\s*([\d.]+)",
-        ]
-        for pattern in patterns:
+        ]:
             m = re.search(pattern, result.stdout, re.IGNORECASE)
             if m:
                 return round(float(m.group(1)), 1)
-        if result.returncode != 0:
-            print(f"[temp] powermetrics error (rc={result.returncode}): {result.stderr.strip()[:200]}")
-        elif result.stdout:
-            # Show a snippet so we can adjust the pattern if needed
-            print(f"[temp] no temperature found; first 300 chars: {result.stdout[:300]!r}")
-    except Exception as exc:
-        print(f"[temp] exception: {exc}")
+    except Exception:
+        pass
+
+    return None
+
+
+def get_thermal_pressure():
+    """
+    Read thermal pressure level via powermetrics thermal sampler.
+    Works on Apple Silicon M4 even when actual temperature is unavailable.
+    Returns one of: "Nominal", "Moderate", "Heavy", "Sleeping", or None.
+    """
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "powermetrics", "--samplers", "thermal", "-n", "1", "-i", "100"],
+            capture_output=True, text=True, timeout=5,
+        )
+        m = re.search(r"Current pressure level:\s*(\w+)", result.stdout)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
     return None
 
 
@@ -271,8 +295,8 @@ def get_stats():
     except Exception:
         pass
 
-    # Temperature - try powermetrics first (Apple Silicon), fall back to psutil
-    temp = get_temp_powermetrics()
+    # Temperature - try osx-cpu-temp / powermetrics (Intel), fall back to psutil
+    temp = get_cpu_temp()
     if temp is None:
         try:
             temps = psutil.sensors_temperatures()
@@ -282,6 +306,9 @@ def get_stats():
                     temp = round(sum(all_temps) / len(all_temps), 1)
         except (AttributeError, NotImplementedError):
             pass
+
+    # Thermal pressure - always works on Apple Silicon M4 even when temp is None
+    thermal_pressure = get_thermal_pressure()
 
     return {
         "cpu":          round(cpu, 1),
@@ -299,6 +326,7 @@ def get_stats():
         "net_tx":       net_tx,
         "net_rx":       net_rx,
         "temp":         temp,
+        "thermal_pressure": thermal_pressure,
         "cpu_freq_ghz": cpu_freq,
     }
 

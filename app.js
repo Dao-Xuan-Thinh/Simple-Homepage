@@ -196,7 +196,7 @@ function renderStats(d) {
           swap, swap_used_gb,
           disk, disk_used_gb, disk_total_gb,
           disk_read_mbs, disk_write_mbs,
-          uptime, net_tx, net_rx, temp, cpu_freq_ghz } = d;
+          uptime, net_tx, net_rx, temp, thermal_pressure, cpu_freq_ghz } = d;
 
   const upEl = document.getElementById('stat-uptime');
   if (upEl) { upEl._baseUptime = uptime; uptimeOffset = 0; }
@@ -205,7 +205,17 @@ function renderStats(d) {
   document.getElementById('stat-ram').textContent  = ram + '%';
   document.getElementById('stat-swap').textContent = swap != null ? swap + '%' : 'N/A';
   document.getElementById('stat-disk').textContent = disk + '%';
-  document.getElementById('stat-temp').textContent = temp != null ? temp + '°C' : 'N/A';
+  const tempEl = document.getElementById('stat-temp');
+  if (temp != null) {
+    tempEl.textContent = temp + '°C';
+    tempEl.style.color = '';
+  } else if (thermal_pressure) {
+    const pressureColors = { Nominal: '', Moderate: 'var(--warning)', Heavy: 'var(--offline)', Sleeping: '' };
+    tempEl.textContent = thermal_pressure;
+    tempEl.style.color = pressureColors[thermal_pressure] ?? '';
+  } else {
+    tempEl.textContent = 'N/A';
+  }
   document.getElementById('stat-net').textContent  = `↑${net_tx} ↓${net_rx} KB/s`;
   document.getElementById('stat-uptime').textContent = fmtUptime(uptime);
 
