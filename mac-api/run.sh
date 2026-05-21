@@ -4,21 +4,19 @@
 #
 # ── First-time setup ──────────────────────────────────────────────
 #
-# 1. Enable Tailscale Funnel (exposes port 9000 to the public internet):
+# 1. Set the write token (one-time, add to ~/.zshrc to persist):
 #
-#   tailscale funnel 9000
+#   export HOMEPAGE_WRITE_TOKEN="your-secret-token"
+#
+#    Generate a token with:
+#    python3 -c "import secrets; print(secrets.token_hex(24))"
+#
+# 2. Enable Tailscale Funnel on port 8443:
+#
+#   tailscale funnel --bg --https=8443 9000
 #
 #    This makes the API reachable at:
-#    https://my-biggest-beefsteak.tail437237.ts.net/api/stats?token=...
-#    (No port number needed — Funnel routes :443 → :9000 automatically)
-#
-#    To disable public access later:
-#    tailscale funnel --bg off
-#
-# 2. (Optional) TLS cert for direct Tailscale-IP access — not needed
-#    if you only use Funnel (Funnel handles TLS automatically):
-#
-#   sudo tailscale cert my-biggest-beefsteak.tail437237.ts.net
+#    https://my-biggest-beefsteak.tail437237.ts.net:8443/api/stats?token=...
 #
 # ── Start the server ──────────────────────────────────────────────
 #
@@ -35,11 +33,10 @@ cd "$SCRIPT_DIR"
 
 HOSTNAME="my-biggest-beefsteak.tail437237.ts.net"
 
-# Check Funnel status
-if ! tailscale funnel status 2>/dev/null | grep -q "9000"; then
-  echo "⚠️  Tailscale Funnel is not active on port 9000."
-  echo "   Run:  tailscale funnel 9000"
-  echo "   Then restart this script."
+if [ -z "$HOMEPAGE_WRITE_TOKEN" ]; then
+  echo "⚠️  HOMEPAGE_WRITE_TOKEN is not set - settings saves will be rejected."
+  echo "   Set it with:  export HOMEPAGE_WRITE_TOKEN=\"your-secret-token\""
+  echo "   Add it to ~/.zshrc to persist across reboots."
   echo ""
 fi
 

@@ -64,9 +64,15 @@ ALLOWED_ORIGINS = [
 API_TOKEN = "3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80"
 
 # WRITE token - required for PUT /api/config (saving settings changes).
-# This is NOT stored in the frontend JS. Users must type it in the settings UI.
-# Change this to something secret: python3 -c "import secrets; print(secrets.token_hex(24))"
-WRITE_TOKEN = "set-a-secret-write-token-here"
+# Loaded from the HOMEPAGE_WRITE_TOKEN environment variable so it never lives in code.
+# Set it before starting the server:
+#   export HOMEPAGE_WRITE_TOKEN="your-secret-token"
+#   python3 server.py
+_write_token_env = os.environ.get("HOMEPAGE_WRITE_TOKEN", "").strip()
+if not _write_token_env:
+    print("WARNING: HOMEPAGE_WRITE_TOKEN env var is not set. Settings saves will be rejected.")
+    print("  Set it with:  export HOMEPAGE_WRITE_TOKEN=\"your-secret-token\"")
+WRITE_TOKEN = _write_token_env
 
 # ── Config file ───────────────────────────────────────────────────────────────
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -466,7 +472,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/config":
             token = qs.get("token", [None])[0]
-            if token != WRITE_TOKEN:
+            if not WRITE_TOKEN or token != WRITE_TOKEN:
                 json_response(self, {"error": "Unauthorized - write token required"}, 401)
                 return
             try:
