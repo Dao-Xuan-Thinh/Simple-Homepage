@@ -1,0 +1,87 @@
+{
+  "projects": [
+    {
+      "id": "immich",
+      "name": "Immich",
+      "icon": "📷",
+      "desc": "Self-hosted photo & video library",
+      "url": "http://100.77.158.48:2283",
+      "check_url": "http://100.77.158.48:2283",
+      "visibility": "private"
+    },
+    {
+      "id": "openclaw",
+      "name": "OpenClaw",
+      "icon": "🐾",
+      "desc": "Server management dashboard",
+      "url": "https://my-biggest-beefsteak.tail437237.ts.net",
+      "check_url": "https://my-biggest-beefsteak.tail437237.ts.net",
+      "visibility": "private"
+    },
+    {
+      "id": "study-portal",
+      "name": "Study Portal",
+      "icon": "🌐",
+      "desc": "Production & staging sites",
+      "url": "https://dao-xuan-thinh.github.io/Study-Portal/",
+      "check_url": "https://dao-xuan-thinh.github.io/Study-Portal/",
+      "visibility": "public"
+    },
+    {
+      "id": "prototype",
+      "name": "Prototype",
+      "icon": "🧪",
+      "desc": "Experimental & WIP builds",
+      "url": "https://my-biggest-beefsteak.tail437237.ts.net:10000/",
+      "check_url": "https://my-biggest-beefsteak.tail437237.ts.net:10000/",
+      "visibility": "public"
+    },
+    {
+      "id": "standby",
+      "name": "Standby",
+      "icon": ":3",
+      "desc": "Simple standby website for iPad and other devices",
+      "url": "https://dao-xuan-thinh.github.io/Simple-StandBy/",
+      "check_url": "https://dao-xuan-thinh.github.io/Simple-StandBy/",
+      "visibility": "public"
+    }
+  ],
+  "services": [
+    {
+      "id": "immich",
+      "name": "Immich",
+      "detail": ":2283",
+      "port": 2283,
+      "docker": "immich_server",
+      "log_file": null,
+      "check_url": null
+    },
+    {
+      "id": "openclaw",
+      "name": "OpenClaw",
+      "detail": ":3000",
+      "port": 3000,
+      "docker": "openclaw",
+      "log_file": null,
+      "check_url": null
+    },
+    {
+      "id": "projects",
+      "name": "SSA Project",
+      "detail": ":8080",
+      "port": 8080,
+      "docker": null,
+      "log_file": null,
+      "check_url": null
+    },
+    {
+      "id": "proto",
+      "name": "Prototypes",
+      "detail": ":4000",
+      "port": 4000,
+      "docker": null,
+      "log_file": null,
+      "check_url": null
+    }
+  ]
+}

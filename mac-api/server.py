@@ -2,30 +2,35 @@
 """
 Mac Mini Stats & Logs API
 =========================
-Serves system stats and service logs over HTTPS so the GitHub Pages
-dashboard can fetch them over Tailscale without mixed-content errors.
+Serves system stats, service status, and logs over HTTP so the GitHub Pages
+dashboard can fetch them via Tailscale Funnel (which handles TLS).
 
-Setup (run once on Mac mini):
-    sudo tailscale cert my-biggest-beefsteak.tail437237.ts.net
-    # Certs are saved to the current directory as .crt and .key files
+Setup:
     pip3 install -r requirements.txt
-
-Usage:
+    tailscale funnel --bg --https=8443 9000   # expose port 9000 publicly
     python3 server.py
 
 Endpoints:
-    GET /api/stats                          — CPU, RAM, Disk, uptime, network
-    GET /api/services                       — per-service TCP health check
-    GET /api/logs?service=immich&lines=50   — last N log lines
+    GET  /api/stats                           — CPU, RAM, Disk, uptime, network
+    GET  /api/services                        — live service + project status (cached)
+    GET  /api/config                          — full project/service config (read)
+    PUT  /api/config?token=<WRITE_TOKEN>      — update config (write, requires write token)
+    GET  /api/logs?service=<id>&lines=50      — last N log lines
 
 CORS is pre-configured for dao-xuan-thinh.github.io and localhost.
 """
 
 import json
+import re
 import socket
+import ssl
 import subprocess
+import threading
 import time
 import os
+import urllib.request
+import urllib.error
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -42,15 +47,9 @@ PORT = 9000
 TAILSCALE_HOSTNAME = "my-biggest-beefsteak.tail437237.ts.net"
 
 # Tailscale Funnel port (the HTTPS port exposed to the internet/Tailscale).
-# Must match what you passed to: tailscale funnel --bg --https=<FUNNEL_PORT> 9000
 FUNNEL_PORT = 8443
 
-# TLS is handled by Tailscale Funnel — the Python server runs plain HTTP.
-# Funnel listens on FUNNEL_PORT (HTTPS), terminates TLS, and forwards HTTP to PORT.
-# Do NOT wrap this server in SSL — it will break the Funnel connection.
-
 # Origins allowed to access the API.
-# Add any extra origins here (e.g. other Tailscale devices you use).
 ALLOWED_ORIGINS = [
     "https://dao-xuan-thinh.github.io",
     "http://localhost",
@@ -60,45 +59,147 @@ ALLOWED_ORIGINS = [
 ]
 
 # ── Token Auth ────────────────────────────────────────────────────────────────
-# All /api/* requests must include ?token=<API_TOKEN> in the query string.
-# Change this to any long random string. Keep it private.
-# Generate a new one with: python3 -c "import secrets; print(secrets.token_hex(24))"
+# READ token — required for all GET /api/* requests.
+# This ends up in the public app.js on GitHub Pages (practical barrier, not secret).
 API_TOKEN = "3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80"
 
-# Per-service config.
-# "docker"   : Docker container name (use `docker ps` to find it). Set to None to skip.
-# "log_file" : Absolute path to a log file. Used if docker is None or docker logs fail.
-# "port"     : Port on localhost to TCP-check for the health endpoint.
-SERVICES = {
-    "immich": {
-        "name": "Immich",
-        "docker": "immich_server",   # adjust to your actual container name
-        "log_file": None,
-        "port": 2283,
-    },
-    "openclaw": {
-        "name": "OpenClaw",
-        "docker": "openclaw",        # adjust to your actual container name
-        "log_file": None,
-        "port": 3000,
-    },
-    "projects": {
-        "name": "Project Sites",
-        "docker": None,
-        "log_file": None,            # e.g. "/var/log/nginx/access.log"
-        "port": 8080,
-    },
-    "proto": {
-        "name": "Prototypes",
-        "docker": None,
-        "log_file": None,
-        "port": 10000,
-    },
-}
+# WRITE token — required for PUT /api/config (saving settings changes).
+# This is NOT stored in the frontend JS. Users must type it in the settings UI.
+# Change this to something secret: python3 -c "import secrets; print(secrets.token_hex(24))"
+WRITE_TOKEN = "set-a-secret-write-token-here"
+
+# ── Config file ───────────────────────────────────────────────────────────────
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+_config_lock  = threading.Lock()
+_status_cache = {"services": [], "projects": [], "ts": 0}
+_status_lock  = threading.Lock()
+
+# ── Config helpers ────────────────────────────────────────────────────────────
+
+def load_config():
+    """Load config.json. Returns the parsed dict (never raises — returns {} on error)."""
+    try:
+        with _config_lock:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as exc:
+        print(f"[config] Failed to load {CONFIG_FILE}: {exc}")
+        return {"projects": [], "services": []}
+
+
+def save_config(data):
+    """Atomically write config.json. Raises on error."""
+    text = json.dumps(data, ensure_ascii=False, indent=2)
+    tmp = CONFIG_FILE + ".tmp"
+    with _config_lock:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, CONFIG_FILE)
+
+
+# ── Status checking ────────────────────────────────────────────────────────────
+
+def check_port(port):
+    """TCP connect to localhost:port — returns True if something is listening."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+def check_url_reachable(url, timeout=4):
+    """HTTP GET to url — returns True if we get any response (even 4xx/5xx)."""
+    if not url:
+        return False
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(url, headers={"User-Agent": "HomepageBot/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx):
+            return True
+    except urllib.error.HTTPError:
+        return True   # server replied — it's up
+    except Exception:
+        return False
+
+
+def refresh_statuses():
+    """Check all services and projects in parallel; update _status_cache."""
+    config = load_config()
+    services  = config.get("services", [])
+    projects  = config.get("projects", [])
+
+    svc_results  = []
+    proj_results = []
+
+    def check_service(svc):
+        if svc.get("check_url"):
+            online = check_url_reachable(svc["check_url"])
+        elif svc.get("port"):
+            online = check_port(svc["port"])
+        else:
+            online = False
+        return {
+            "id":     svc["id"],
+            "name":   svc.get("name", svc["id"]),
+            "detail": svc.get("detail", ""),
+            "port":   svc.get("port"),
+            "online": online,
+        }
+
+    def check_project(proj):
+        online = check_url_reachable(proj.get("check_url") or proj.get("url", ""))
+        return {
+            "id":         proj["id"],
+            "name":       proj.get("name", proj["id"]),
+            "icon":       proj.get("icon", "🔗"),
+            "desc":       proj.get("desc", ""),
+            "url":        proj.get("url", ""),
+            "visibility": proj.get("visibility", "public"),
+            "online":     online,
+        }
+
+    checks = [(check_service, s) for s in services] + [(check_project, p) for p in projects]
+
+    with ThreadPoolExecutor(max_workers=min(16, len(checks) + 1)) as ex:
+        futures = {ex.submit(fn, item): (fn, item) for fn, item in checks}
+        for fut in as_completed(futures):
+            fn, item = futures[fut]
+            try:
+                result = fut.result()
+                if fn is check_service:
+                    svc_results.append(result)
+                else:
+                    proj_results.append(result)
+            except Exception as exc:
+                print(f"[status] Error checking {item.get('id', '?')}: {exc}")
+
+    # Preserve ordering from config
+    svc_order  = {s["id"]: i for i, s in enumerate(services)}
+    proj_order = {p["id"]: i for i, p in enumerate(projects)}
+    svc_results.sort(key=lambda x: svc_order.get(x["id"], 999))
+    proj_results.sort(key=lambda x: proj_order.get(x["id"], 999))
+
+    with _status_lock:
+        _status_cache["services"]  = svc_results
+        _status_cache["projects"]  = proj_results
+        _status_cache["ts"]        = int(time.time())
+
+
+def status_refresh_loop():
+    """Background thread: refresh statuses every 30 seconds."""
+    while True:
+        try:
+            refresh_statuses()
+        except Exception as exc:
+            print(f"[status] refresh error: {exc}")
+        time.sleep(30)
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-
-import re
 
 def get_temp_powermetrics():
     """
@@ -181,30 +282,9 @@ def get_stats():
     }
 
 
-def check_service(port):
-    """TCP connect to localhost:port — returns True if something is listening."""
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=2):
-            return True
-    except OSError:
-        return False
-
-
-def get_services_status():
-    result = []
-    for key, svc in SERVICES.items():
-        online = check_service(svc["port"]) if svc["port"] else False
-        result.append({
-            "id":     key,
-            "name":   svc["name"],
-            "port":   svc["port"],
-            "online": online,
-        })
-    return result
-
-
 def get_logs(service_key, lines=50):
-    svc = SERVICES.get(service_key)
+    config = load_config()
+    svc = next((s for s in config.get("services", []) if s["id"] == service_key), None)
     if not svc:
         return {"error": f"Unknown service: {service_key}"}
 
@@ -239,7 +319,7 @@ def get_logs(service_key, lines=50):
         return {
             "service": service_key,
             "lines": [],
-            "warning": "No log source available. Configure 'docker' container name or 'log_file' path in server.py SERVICES dict.",
+            "warning": "No log source available. Set 'docker' container name or 'log_file' path in config.json.",
         }
 
     parsed = []
@@ -313,10 +393,7 @@ def set_cors(handler):
     origin = handler.headers.get("Origin", "")
     if origin in ALLOWED_ORIGINS:
         handler.send_header("Access-Control-Allow-Origin", origin)
-    else:
-        # Deny — don't send CORS header
-        pass
-    handler.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+    handler.send_header("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")
     handler.send_header("Vary", "Origin")
 
@@ -354,11 +431,13 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": str(e)}, 500)
 
         elif path == "/api/services":
-            try:
-                data = get_services_status()
-                json_response(self, data)
-            except Exception as e:
-                json_response(self, {"error": str(e)}, 500)
+            with _status_lock:
+                data = dict(_status_cache)
+            json_response(self, data)
+
+        elif path == "/api/config":
+            config = load_config()
+            json_response(self, config)
 
         elif path == "/api/logs":
             service = qs.get("service", ["immich"])[0]
@@ -380,22 +459,58 @@ class Handler(BaseHTTPRequestHandler):
         else:
             json_response(self, {"error": "Not found"}, 404)
 
+    def do_PUT(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        qs = parse_qs(parsed.query)
+
+        if path == "/api/config":
+            token = qs.get("token", [None])[0]
+            if token != WRITE_TOKEN:
+                json_response(self, {"error": "Unauthorized — write token required"}, 401)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length)
+                new_config = json.loads(body.decode("utf-8"))
+                # Basic validation
+                if not isinstance(new_config.get("projects"), list) or \
+                   not isinstance(new_config.get("services"), list):
+                    json_response(self, {"error": "Invalid config shape"}, 400)
+                    return
+                save_config(new_config)
+                # Trigger a status refresh in the background
+                threading.Thread(target=refresh_statuses, daemon=True).start()
+                json_response(self, {"ok": True})
+            except (json.JSONDecodeError, ValueError) as e:
+                json_response(self, {"error": f"Bad JSON: {e}"}, 400)
+            except Exception as e:
+                json_response(self, {"error": str(e)}, 500)
+        else:
+            json_response(self, {"error": "Not found"}, 404)
+
 
 # ── Entry Point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Bind to 127.0.0.1 only — Tailscale Funnel connects from localhost,
-    # so this works for Funnel while blocking direct Tailscale-IP connections
-    # that would cause TLS handshake errors in the log.
+    # Bind to 127.0.0.1 — Tailscale Funnel connects from localhost.
+    # This blocks direct Tailscale-IP connections that cause TLS noise in the log.
     server = HTTPServer(("127.0.0.1", PORT), Handler)
 
     print(f"Mac Mini Stats API running on port {PORT} (plain HTTP — TLS handled by Tailscale Funnel)")
-    print(f"  API token: {API_TOKEN}")
+    print(f"  API token:   {API_TOKEN}")
+    print(f"  Write token: {WRITE_TOKEN}")
     print(f"  Local:    http://{TAILSCALE_HOSTNAME}:{PORT}/api/stats?token={API_TOKEN}")
     print(f"")
     print(f"  Public URL (via Tailscale Funnel on :{FUNNEL_PORT}):")
     print(f"  https://{TAILSCALE_HOSTNAME}:{FUNNEL_PORT}/api/stats?token={API_TOKEN}")
     print("Press Ctrl+C to stop.")
+
+    # Initial status check + background refresh loop
+    print("[status] Running initial status check...")
+    threading.Thread(target=refresh_statuses, daemon=True).start()
+    threading.Thread(target=status_refresh_loop, daemon=True).start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:

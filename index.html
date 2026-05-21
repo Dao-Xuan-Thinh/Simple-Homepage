@@ -15,9 +15,12 @@
         <span class="brand-icon">⌂</span>
         <h1>My Dashboard</h1>
       </div>
-      <button id="theme-toggle" aria-label="Toggle theme" title="Toggle light / dark mode">
-        <span id="theme-icon">☀️</span>
-      </button>
+      <div class="header-actions">
+        <button id="settings-btn" aria-label="Settings" title="Manage projects &amp; services">⚙️</button>
+        <button id="theme-toggle" aria-label="Toggle theme" title="Toggle light / dark mode">
+          <span id="theme-icon">☀️</span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -28,62 +31,9 @@
       <h2 class="section-title">
         <span class="section-icon">🔗</span> Projects &amp; Services
       </h2>
-      <div class="cards-grid">
-
-        <a class="card project-card" href="http://100.77.158.48:2283" target="_blank" rel="noopener">
-          <div class="card-icon">📷</div>
-          <div class="card-body">
-            <div class="card-name">Immich (Private)</div>
-            <div class="card-desc">Self-hosted photo &amp; video library</div>
-          </div>
-          <span class="status-dot online" title="Status placeholder"></span>
-        </a>
-
-        <a class="card project-card" href="https://my-biggest-beefsteak.tail437237.ts.net" target="_blank" rel="noopener">
-          <div class="card-icon">🐾</div>
-          <div class="card-body">
-            <div class="card-name">-OpenClaw- Protocol Temp Port Home (Private)</div>
-            <div class="card-desc">Server management dashboard</div>
-          </div>
-          <span class="status-dot online" title="Status placeholder"></span>
-        </a>
-
-        <a class="card project-card" href="https://dao-xuan-thinh.github.io/Study-Portal/" target="_blank" rel="noopener">
-          <div class="card-icon">🌐</div>
-          <div class="card-body">
-            <div class="card-name">Study Portal (Public)</div>
-            <div class="card-desc">Production &amp; staging sites</div>
-          </div>
-          <span class="status-dot online" title="Status placeholder"></span>
-        </a>
-
-        <a class="card project-card" href="https://my-biggest-beefsteak.tail437237.ts.net:10000/" target="_blank" rel="noopener">
-          <div class="card-icon">🧪</div>
-          <div class="card-body">
-            <div class="card-name">Prototype (Outdated)</div>
-            <div class="card-desc">Old Frame</div>
-          </div>
-          <span class="status-dot warning" title="Status placeholder"></span>
-        </a>
-
-        <a class="card project-card" href="https://my-biggest-beefsteak.tail437237.ts.net:5000/" target="_blank" rel="noopener">
-          <div class="card-icon">😿</div>
-          <div class="card-body">
-            <div class="card-name">Prototype (Public)</div>
-            <div class="card-desc">Experimental &amp; WIP builds</div>
-          </div>
-          <span class="status-dot offline" title="Status placeholder"></span>
-        </a>
-
-        <a class="card project-card" href="https://dao-xuan-thinh.github.io/Simple-StandBy/" target="_blank" rel="noopener">
-          <div class="card-icon">:3</div>
-          <div class="card-body">
-            <div class="card-name">Standby (Public)</div>
-            <div class="card-desc">Simple standby website for iPad and other devices</div>
-          </div>
-          <span class="status-dot online" title="Status placeholder"></span>
-        </a>
-
+      <!-- Populated dynamically by app.js from /api/config -->
+      <div class="cards-grid" id="projects-grid">
+        <div class="card placeholder-card">Loading…</div>
       </div>
     </section>
 
@@ -91,7 +41,7 @@
     <section class="section">
       <h2 class="section-title">
         <span class="section-icon">🖥️</span> Mac Mini Status
-        <span class="badge badge-mock" id="badge-mac">Mock Data</span>
+        <span class="badge badge-mock" id="badge-mac">Connecting…</span>
       </h2>
       <div class="cards-grid stats-grid">
 
@@ -144,7 +94,7 @@
         <div class="card stat-card">
           <div class="stat-label">Uptime</div>
           <div class="stat-value uptime" id="stat-uptime">—</div>
-          <div class="stat-sub">Mac mini M4 · macOS Tahoe 26.5</div>
+          <div class="stat-sub">Mac mini M4 · macOS</div>
         </div>
 
       </div>
@@ -154,65 +104,11 @@
     <section class="section">
       <h2 class="section-title">
         <span class="section-icon">📡</span> Server Status
-        <span class="badge badge-mock" id="badge-servers">Mock Data</span>
+        <span class="badge badge-mock" id="badge-servers">Connecting…</span>
       </h2>
-      <div class="cards-grid server-grid">
-
-        <div class="card server-card">
-          <div class="server-info">
-            <span class="server-name">Immich</span>
-            <span class="server-detail">:2283</span>
-          </div>
-          <div class="server-meta">
-            <span class="status-badge online">Online</span>
-            <span class="last-checked" id="lc-immich">checking…</span>
-          </div>
-        </div>
-
-        <div class="card server-card">
-          <div class="server-info">
-            <span class="server-name">OpenClaw (Wrong hook)</span>
-            <span class="server-detail">:3000</span>
-          </div>
-          <div class="server-meta">
-            <span class="status-badge online">Online</span>
-            <span class="last-checked" id="lc-openclaw">checking…</span>
-          </div>
-        </div>
-
-        <div class="card server-card">
-          <div class="server-info">
-            <span class="server-name">SSA Project (Homeless)</span>
-            <span class="server-detail">:8080</span>
-          </div>
-          <div class="server-meta">
-            <span class="status-badge online">Online</span>
-            <span class="last-checked" id="lc-projects">checking…</span>
-          </div>
-        </div>
-
-        <div class="card server-card">
-          <div class="server-info">
-            <span class="server-name">Prototypes</span>
-            <span class="server-detail">:4000</span>
-          </div>
-          <div class="server-meta">
-            <span class="status-badge warning">Degraded</span>
-            <span class="last-checked" id="lc-proto">checking…</span>
-          </div>
-        </div>
-
-        <div class="card server-card">
-          <div class="server-info">
-            <span class="server-name">Tailscale</span>
-            <span class="server-detail">VPN tunnel</span>
-          </div>
-          <div class="server-meta">
-            <span class="status-badge online">Connected</span>
-            <span class="last-checked" id="lc-tailscale">checking…</span>
-          </div>
-        </div>
-
+      <!-- Populated dynamically by app.js from /api/services -->
+      <div class="cards-grid server-grid" id="services-grid">
+        <div class="card placeholder-card">Loading…</div>
       </div>
     </section>
 
@@ -220,15 +116,11 @@
     <section class="section">
       <h2 class="section-title">
         <span class="section-icon">📋</span> Logs
-        <span class="badge badge-mock" id="badge-logs">Mock Data</span>
+        <span class="badge badge-mock" id="badge-logs">Connecting…</span>
       </h2>
       <div class="log-controls">
-        <select id="log-server" aria-label="Select server">
-          <option value="immich">Immich</option>
-          <option value="openclaw">OpenClaw</option>
-          <option value="projects">Project Sites</option>
-          <option value="proto">Prototypes</option>
-        </select>
+        <!-- Options populated dynamically from config services -->
+        <select id="log-server" aria-label="Select server"></select>
         <button id="log-refresh" title="Refresh logs">↻ Refresh</button>
         <label class="log-follow-wrap">
           <input type="checkbox" id="log-follow" checked />
@@ -245,6 +137,70 @@
   <footer>
     <p>Hosted on <a href="https://pages.github.com" target="_blank" rel="noopener">GitHub Pages</a> · Connected via Tailscale</p>
   </footer>
+
+  <!-- ── Settings Modal ────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <h2 id="modal-title">⚙️ Settings</h2>
+        <button class="modal-close" id="modal-close" aria-label="Close">✕</button>
+      </div>
+
+      <div class="modal-tabs" role="tablist">
+        <button class="tab-btn active" role="tab" data-tab="projects">🔗 Projects</button>
+        <button class="tab-btn" role="tab" data-tab="services">📡 Services</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Projects tab -->
+        <div class="tab-panel" id="tab-projects">
+          <ul class="settings-list" id="proj-list"></ul>
+          <details class="add-form-wrap">
+            <summary>+ Add project</summary>
+            <div class="add-form">
+              <input type="text"  id="add-proj-name"  placeholder="Name"        />
+              <input type="text"  id="add-proj-icon"  placeholder="Icon (emoji)" maxlength="4" />
+              <input type="text"  id="add-proj-desc"  placeholder="Description"  />
+              <input type="url"   id="add-proj-url"   placeholder="URL"          />
+              <input type="url"   id="add-proj-check" placeholder="Check URL (optional, defaults to URL)" />
+              <select id="add-proj-vis">
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+              </select>
+              <button class="btn-add" id="btn-add-proj">Add</button>
+            </div>
+          </details>
+        </div>
+
+        <!-- Services tab -->
+        <div class="tab-panel hidden" id="tab-services">
+          <ul class="settings-list" id="svc-list"></ul>
+          <details class="add-form-wrap">
+            <summary>+ Add service</summary>
+            <div class="add-form">
+              <input type="text"   id="add-svc-name"   placeholder="Name"             />
+              <input type="text"   id="add-svc-detail" placeholder="Detail (e.g. :3000)" />
+              <input type="number" id="add-svc-port"   placeholder="Port (for TCP check)" min="1" max="65535" />
+              <input type="url"    id="add-svc-check"  placeholder="Check URL (optional)" />
+              <input type="text"   id="add-svc-docker" placeholder="Docker container name (optional)" />
+              <button class="btn-add" id="btn-add-svc">Add</button>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div class="write-token-row">
+          <label for="write-token">Write token:</label>
+          <input type="password" id="write-token" placeholder="Enter write token to save" autocomplete="off" />
+        </div>
+        <div class="modal-footer-actions">
+          <span class="save-status" id="save-status"></span>
+          <button class="btn-save" id="btn-save">💾 Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
