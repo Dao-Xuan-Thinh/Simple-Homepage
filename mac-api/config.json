@@ -53,6 +53,12 @@
       "detail": ":2283",
       "port": 2283,
       "docker": "immich_server",
+      "containers": [
+        {"label": "Server",   "docker": "immich_server"},
+        {"label": "Database", "docker": "immich-database"},
+        {"label": "ML",       "docker": "immich_machine_learning"},
+        {"label": "Redis",    "docker": "redis"}
+      ],
       "log_file": null,
       "check_url": null
     },

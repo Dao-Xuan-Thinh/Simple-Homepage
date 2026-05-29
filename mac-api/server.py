@@ -331,7 +331,7 @@ def get_stats():
     }
 
 
-def get_logs(service_key, lines=50):
+def get_logs(service_key, lines=50, container=None):
     config = load_config()
     svc = next((s for s in config.get("services", []) if s["id"] == service_key), None)
     if not svc:
@@ -339,11 +339,14 @@ def get_logs(service_key, lines=50):
 
     raw_lines = []
 
+    # `container` param overrides the service's default docker container name
+    docker_name = container or svc.get("docker")
+
     # Try Docker first
-    if svc.get("docker"):
+    if docker_name:
         try:
             result = subprocess.run(
-                ["docker", "logs", "--tail", str(lines), "--timestamps", svc["docker"]],
+                ["docker", "logs", "--tail", str(lines), "--timestamps", docker_name],
                 capture_output=True, text=True, timeout=10,
             )
             # Docker sends logs to stderr by default
@@ -490,10 +493,11 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/api/logs":
             service = qs.get("service", ["immich"])[0]
+            container = qs.get("container", [None])[0]
             lines = int(qs.get("lines", ["50"])[0])
             lines = max(1, min(lines, 500))  # clamp 1-500
             try:
-                data = get_logs(service, lines)
+                data = get_logs(service, lines, container=container)
                 data["lines"] = [l for l in data.get("lines", []) if l]  # remove None
                 json_response(self, data)
             except Exception as e:

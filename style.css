@@ -712,8 +712,80 @@ footer a:hover { text-decoration: underline; }
 .btn-save:hover:not(:disabled)   { background: var(--accent-hover); }
 .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
 
-@media (max-width: 480px) {
-  .modal { max-height: 100vh; border-radius: 0; }
-  .entry-fields input, .entry-fields select { flex-basis: 100%; }
+/* ─────────────────────────────────────────────────────────────────
+   LOG SETTINGS TAB
+   ───────────────────────────────────────────────────────────────── */
+
+.tab-hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
 }
+
+.log-svc-section {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.log-svc-header {
+  background: var(--card-bg);
+  padding: 0.4rem 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+
+.log-containers-list {
+  padding: 0.4rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.log-container-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.log-container-entry input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.82rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  transition: border-color var(--transition);
+}
+.log-container-entry input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.btn-add-small {
+  display: inline-block;
+  margin: 0.3rem 0.5rem 0.5rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: transparent;
+  color: var(--accent);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.btn-add-small:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+
 

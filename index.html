@@ -121,6 +121,7 @@
       <div class="log-controls">
         <!-- Options populated dynamically from config services -->
         <select id="log-server" aria-label="Select server"></select>
+        <select id="log-container" aria-label="Select container" hidden></select>
         <button id="log-refresh" title="Refresh logs">↻ Refresh</button>
         <label class="log-follow-wrap">
           <input type="checkbox" id="log-follow" checked />
@@ -149,6 +150,7 @@
       <div class="modal-tabs" role="tablist">
         <button class="tab-btn active" role="tab" data-tab="projects">🔗 Projects</button>
         <button class="tab-btn" role="tab" data-tab="services">📡 Services</button>
+        <button class="tab-btn" role="tab" data-tab="logs">📋 Logs</button>
       </div>
 
       <div class="modal-body">
@@ -186,6 +188,12 @@
               <button class="btn-add" id="btn-add-svc">Add</button>
             </div>
           </details>
+        </div>
+
+        <!-- Logs tab -->
+        <div class="tab-panel hidden" id="tab-logs">
+          <p class="tab-hint">Configure which Docker containers or log files appear in the Log Viewer for each service.</p>
+          <div id="log-sources-list"></div>
         </div>
       </div>
 

@@ -185,6 +185,7 @@ function populateLogSelector(services) {
     `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`
   ).join('');
   if (prev && services.find(s => s.id === prev)) sel.value = prev;
+  updateContainerSelector(services);
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -335,8 +336,28 @@ setInterval(async () => {
 
 const logViewer  = document.getElementById('log-viewer');
 const logSelect  = document.getElementById('log-server');
+const logContainer = document.getElementById('log-container');
 const logRefresh = document.getElementById('log-refresh');
 const logFollow  = document.getElementById('log-follow');
+
+/* Update the container sub-selector based on the chosen service */
+function updateContainerSelector(services) {
+  if (!logContainer) return;
+  const svcId = logSelect.value;
+  const svc = (services || _config.services || []).find(s => s.id === svcId);
+  const containers = svc?.containers;
+  if (containers && containers.length > 1) {
+    const prev = logContainer.value;
+    logContainer.innerHTML = containers.map(c =>
+      `<option value="${escapeHtml(c.docker)}">${escapeHtml(c.label)}</option>`
+    ).join('');
+    if (prev && containers.find(c => c.docker === prev)) logContainer.value = prev;
+    logContainer.hidden = false;
+  } else {
+    logContainer.innerHTML = '';
+    logContainer.hidden = true;
+  }
+}
 
 function renderLogLines(lines) {
   if (!lines.length) {
@@ -356,7 +377,11 @@ function renderLogLines(lines) {
 async function refreshLog() {
   const server = logSelect.value;
   if (!server) return;
-  const data = await apiFetch(`/api/logs?service=${server}&lines=50`);
+  let url = `/api/logs?service=${server}&lines=50`;
+  if (logContainer && !logContainer.hidden && logContainer.value) {
+    url += `&container=${encodeURIComponent(logContainer.value)}`;
+  }
+  const data = await apiFetch(url);
   if (data && data.lines && data.lines.length > 0) {
     renderLogLines(data.lines);
     setBadgeLive('badge-logs');
@@ -370,8 +395,9 @@ async function refreshLog() {
   }
 }
 
-logSelect.addEventListener('change', refreshLog);
+logSelect.addEventListener('change', () => { updateContainerSelector(); refreshLog(); });
 logRefresh.addEventListener('click', refreshLog);
+if (logContainer) logContainer.addEventListener('change', refreshLog);
 setInterval(refreshLog, 10000);
 
 /* ─────────────────────────────────────────────────────────────────
@@ -422,6 +448,50 @@ function makeDeleteBtn(onClick) {
   return btn;
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   LOG SETTINGS HELPERS
+   ───────────────────────────────────────────────────────────────── */
+
+let _logKeyCounter = 0;
+
+function makeContainerEntry(label = '', docker = '') {
+  const div = document.createElement('div');
+  div.className = 'log-container-entry';
+  div.innerHTML = `
+    <input type="text" data-field="container-label"  value="${escapeHtml(label)}"  placeholder="Label (e.g. Server)" />
+    <input type="text" data-field="container-docker" value="${escapeHtml(docker)}" placeholder="Docker container name" />`;
+  div.appendChild(makeDeleteBtn(() => div.remove()));
+  return div;
+}
+
+function makeLogSourceSection(svc) {
+  const key = ++_logKeyCounter;
+  const section = document.createElement('div');
+  section.className = 'log-svc-section';
+  section.dataset.logKey = key;
+
+  const header = document.createElement('div');
+  header.className = 'log-svc-header';
+  header.textContent = svc.name || 'Unnamed service';
+  section.appendChild(header);
+
+  const list = document.createElement('div');
+  list.className = 'log-containers-list';
+  section.appendChild(list);
+
+  const containers = svc.containers || (svc.docker ? [{ label: 'Default', docker: svc.docker }] : []);
+  containers.forEach(c => list.appendChild(makeContainerEntry(c.label, c.docker)));
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'btn-add-small';
+  addBtn.textContent = '+ Add container';
+  addBtn.type = 'button';
+  addBtn.addEventListener('click', () => list.appendChild(makeContainerEntry()));
+  section.appendChild(addBtn);
+
+  return { section, key };
+}
+
 function populateSettingsModal(config) {
   // Projects
   const projList = document.getElementById('proj-list');
@@ -446,12 +516,18 @@ function populateSettingsModal(config) {
     projList.appendChild(li);
   });
 
-  // Services
+  // Services + Logs tab (built together to keep them linked)
   const svcList = document.getElementById('svc-list');
+  const logSourcesList = document.getElementById('log-sources-list');
   svcList.innerHTML = '';
-  (config.services || []).forEach((s, i) => {
+  logSourcesList.innerHTML = '';
+  (config.services || []).forEach((s) => {
+    const { section, key } = makeLogSourceSection(s);
+    logSourcesList.appendChild(section);
+
     const li = document.createElement('li');
     li.className = 'settings-entry';
+    li.dataset.logKey = key;
     li.innerHTML = `
       <div class="entry-fields">
         <input type="text"   data-field="name"   value="${escapeHtml(s.name)}"   placeholder="Name"   />
@@ -460,7 +536,10 @@ function populateSettingsModal(config) {
         <input type="url"    data-field="check_url" value="${escapeHtml(s.check_url || '')}" placeholder="Check URL (optional)" />
         <input type="text"   data-field="docker" value="${escapeHtml(s.docker || '')}" placeholder="Docker container (optional)" />
       </div>`;
-    li.appendChild(makeDeleteBtn(() => { li.remove(); }));
+    li.appendChild(makeDeleteBtn(() => {
+      document.querySelector(`.log-svc-section[data-log-key="${key}"]`)?.remove();
+      li.remove();
+    }));
     svcList.appendChild(li);
   });
 }
@@ -508,8 +587,12 @@ document.getElementById('btn-add-svc').addEventListener('click', () => {
   const docker = document.getElementById('add-svc-docker').value.trim();
   if (!name) return alert('Name is required.');
 
+  const { section, key } = makeLogSourceSection({ name, docker, containers: [] });
+  document.getElementById('log-sources-list').appendChild(section);
+
   const li = document.createElement('li');
   li.className = 'settings-entry';
+  li.dataset.logKey = key;
   li.innerHTML = `
     <div class="entry-fields">
       <input type="text"   data-field="name"      value="${escapeHtml(name)}"   placeholder="Name"   />
@@ -518,7 +601,10 @@ document.getElementById('btn-add-svc').addEventListener('click', () => {
       <input type="url"    data-field="check_url" value="${escapeHtml(check)}"  placeholder="Check URL" />
       <input type="text"   data-field="docker"    value="${escapeHtml(docker)}" placeholder="Docker container" />
     </div>`;
-  li.appendChild(makeDeleteBtn(() => li.remove()));
+  li.appendChild(makeDeleteBtn(() => {
+    document.querySelector(`.log-svc-section[data-log-key="${key}"]`)?.remove();
+    li.remove();
+  }));
   document.getElementById('svc-list').appendChild(li);
 
   ['add-svc-name','add-svc-detail','add-svc-port','add-svc-check','add-svc-docker'].forEach(id => {
@@ -551,14 +637,30 @@ function collectConfig() {
     const name = get('name');
     if (!name) return;
     const portVal = parseInt(get('port'), 10);
+
+    // Read containers from linked log section
+    const key = li.dataset.logKey;
+    const logSection = key ? document.querySelector(`.log-svc-section[data-log-key="${key}"]`) : null;
+    const containers = [];
+    if (logSection) {
+      logSection.querySelectorAll('.log-container-entry').forEach(entry => {
+        const label  = entry.querySelector('[data-field="container-label"]')?.value.trim() ?? '';
+        const docker = entry.querySelector('[data-field="container-docker"]')?.value.trim() ?? '';
+        if (docker) containers.push({ label: label || docker, docker });
+      });
+    }
+
+    const dockerField = get('docker') || null;
+    const primaryDocker = containers.length > 0 ? containers[0].docker : dockerField;
     services.push({
-      id:        slugify(name),
+      id:         slugify(name),
       name,
-      detail:    get('detail'),
-      port:      isNaN(portVal) ? null : portVal,
-      check_url: get('check_url') || null,
-      docker:    get('docker') || null,
-      log_file:  null,
+      detail:     get('detail'),
+      port:       isNaN(portVal) ? null : portVal,
+      check_url:  get('check_url') || null,
+      docker:     primaryDocker,
+      containers: containers.length > 0 ? containers : undefined,
+      log_file:   null,
     });
   });
 
@@ -600,6 +702,7 @@ btnSave.addEventListener('click', async () => {
     renderProjectCards(newConfig.projects);
     renderServiceCards(newConfig.services);
     populateLogSelector(newConfig.services);
+    updateContainerSelector(newConfig.services);
     refreshLog();
     // Fetch fresh statuses immediately
     setTimeout(() => fetchAndRenderServices(), 500);
