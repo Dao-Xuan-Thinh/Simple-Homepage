@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Changelog — My Dashboard</title>
+  <link rel="stylesheet" href="../../style.css" />
+  <style>
+    body { max-width: 720px; margin: 0 auto; padding: 2rem 1.25rem; }
+    h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 2.5rem; }
+    .back-link { font-size: 0.85rem; margin-bottom: 1.5rem; display: inline-block; color: var(--accent); text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+
+    .entry { border-left: 3px solid var(--border); padding: 0 0 1.5rem 1.25rem; position: relative; }
+    .entry + .entry { border-top: none; }
+    .entry::before {
+      content: '';
+      position: absolute;
+      left: -6px;
+      top: 0.4rem;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--bg);
+    }
+
+    .entry-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
+    .entry-title { font-size: 1rem; font-weight: 700; }
+    .entry-date  { font-size: 0.78rem; color: var(--muted); }
+    .badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 0.15rem 0.5rem;
+      border-radius: 99px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-latest  { background: var(--accent);  color: #fff; }
+    .badge-rc      { background: #7c3aed;         color: #fff; }
+    .badge-hotfix  { background: var(--offline);  color: #fff; }
+    .badge-test    { background: var(--warning);  color: #000; }
+
+    ul.changes { margin: 0; padding-left: 1.2rem; color: var(--text); font-size: 0.9rem; line-height: 1.7; }
+    ul.changes li { margin-bottom: 0.15rem; }
+    .tag { font-size: 0.72rem; font-weight: 700; padding: 0.1rem 0.35rem; border-radius: 4px;
+           margin-right: 0.3rem; text-transform: uppercase; }
+    .tag-feat   { background: #d1fae5; color: #065f46; }
+    .tag-fix    { background: #fee2e2; color: #991b1b; }
+    .tag-api    { background: #dbeafe; color: #1e40af; }
+    .tag-ui     { background: #fef3c7; color: #92400e; }
+    .tag-sec    { background: #ede9fe; color: #5b21b6; }
+    body.dark .tag-feat { background: #064e3b; color: #6ee7b7; }
+    body.dark .tag-fix  { background: #7f1d1d; color: #fca5a5; }
+    body.dark .tag-api  { background: #1e3a5f; color: #93c5fd; }
+    body.dark .tag-ui   { background: #78350f; color: #fcd34d; }
+    body.dark .tag-sec  { background: #4c1d95; color: #c4b5fd; }
+  </style>
+</head>
+<body>
+  <a class="back-link" href="../../index.html">← Back to Dashboard</a>
+  <h1>📋 Changelog</h1>
+  <p class="subtitle">All notable changes to the homepage dashboard.</p>
+
+  <div class="timeline">
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Batch 2</span>
+        <span class="badge badge-latest">Latest</span>
+        <span class="entry-date">2026-05-29</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-feat">feat</span>Multi-container log viewer — select individual containers (Server, Database, ML, Redis) for Immich</li>
+        <li><span class="tag tag-feat">feat</span>📋 Logs tab in settings modal — add, remove, and reorder Docker containers per service from the browser</li>
+        <li><span class="tag tag-api">api</span><code>GET /api/logs</code> now accepts <code>?container=&lt;name&gt;</code> to fetch a specific Docker container's logs</li>
+        <li><span class="tag tag-ui">ui</span>Container sub-selector appears in log controls when a multi-container service is chosen</li>
+        <li><span class="tag tag-ui">ui</span>Service delete in settings also removes its linked log section</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Batch 1 — fix: thermal pressure fallback (Apple Silicon M4)</span>
+        <span class="entry-date">2026-05-21</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-fix">fix</span>Apple Silicon M4 exposes no CPU die temperature via any powermetrics sampler — fell back to thermal pressure level (Nominal / Moderate / Heavy)</li>
+        <li><span class="tag tag-api">api</span>Added <code>thermal_pressure</code> field to <code>/api/stats</code> response</li>
+        <li><span class="tag tag-ui">ui</span>Thermal card shows pressure level with color coding when temperature is unavailable</li>
+        <li><span class="tag tag-fix">fix</span>Replaced em dashes (—) with ASCII hyphens (-) in <code>server.py</code> bytes literals (SyntaxError on Python 3)</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Phase 4 — Dynamic config &amp; web-editable settings</span>
+        <span class="entry-date">2026-05-19</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-feat">feat</span>Settings modal with Projects and Services tabs — add/edit/delete without touching code</li>
+        <li><span class="tag tag-feat">feat</span>Config saved to <code>config.json</code> on Mac mini via <code>PUT /api/config</code></li>
+        <li><span class="tag tag-sec">sec</span>Write token (separate from read token) required for all config mutations; never committed to Git</li>
+        <li><span class="tag tag-feat">feat</span>Auto status-check: Mac mini pings each project/service URL and reports online/offline</li>
+        <li><span class="tag tag-api">api</span>New <code>GET /api/config</code> and <code>PUT /api/config</code> endpoints</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Phase 3 — Tailscale Funnel + Token Auth</span>
+        <span class="entry-date">2026-05-19</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-sec">sec</span>API protected by random token (<code>?token=</code>) — 401 without it</li>
+        <li><span class="tag tag-feat">feat</span>Tailscale Funnel exposes the API publicly at <code>https://my-biggest-beefsteak.tail437237.ts.net:8443/</code></li>
+        <li><span class="tag tag-api">api</span>Server runs plain HTTP; TLS terminated by Tailscale Funnel</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Phase 2 — Real Stats &amp; Logs API</span>
+        <span class="entry-date">2026-05-19</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-api">api</span>Python API server on Mac mini — <code>/api/stats</code>, <code>/api/services</code>, <code>/api/logs</code></li>
+        <li><span class="tag tag-feat">feat</span>Live CPU, RAM, Disk, Swap, Network, Uptime stats from Mac mini via <code>psutil</code></li>
+        <li><span class="tag tag-feat">feat</span>Docker log viewer — last N lines from any configured container</li>
+        <li><span class="tag tag-feat">feat</span>Service health checks via TCP port or HTTP GET</li>
+        <li><span class="tag tag-ui">ui</span>Error state — red badges and "Can't connect" message when API is unreachable</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Phase 1 — Initial Homepage</span>
+        <span class="entry-date">2026-05-14</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-feat">feat</span>Static homepage with project links, Mac mini status panel, and log viewer placeholder</li>
+        <li><span class="tag tag-ui">ui</span>Light/Dark mode toggle persisted in localStorage</li>
+        <li><span class="tag tag-ui">ui</span>Responsive card grid layout</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <script>
+    // Sync dark mode from localStorage
+    if (localStorage.getItem('theme') === 'dark') document.body.classList.add('dark');
+  </script>
+</body>
+</html>
