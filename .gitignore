@@ -1,0 +1,9 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# macOS cruft
+.DS_Store
+
+# Local server logs / temp
+*.log

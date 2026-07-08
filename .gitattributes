@@ -1,0 +1,13 @@
+# Normalize line endings: store as LF in the repo and check out LF everywhere.
+# Stops the whole tree flipping to CRLF and showing up as spurious diffs.
+* text=auto eol=lf
+
+# Scripts run on the Mac mini — keep them LF regardless of platform.
+*.sh text eol=lf
+
+# Binary assets: never touch their bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
