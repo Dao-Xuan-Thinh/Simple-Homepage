@@ -68,8 +68,26 @@
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <div class="entry">
       <div class="entry-header">
-        <span class="entry-title">Batch 2</span>
+        <span class="entry-title">Batch 3 — Downloads section &amp; server refresh</span>
         <span class="badge badge-latest">Latest</span>
+        <span class="entry-date">2026-07-09</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-feat">feat</span>Downloads section — auto-synced from the GitHub API (client-side), so new tool repos appear on their own with no config edits</li>
+        <li><span class="tag tag-ui">ui</span>Download cards show language dot, star count, last-updated date, plus Code / ZIP / Releases links</li>
+        <li><span class="tag tag-feat">feat</span>Refreshed live services to match what's actually running — added P-Cal and the RustDesk relay (hbbs/hbbr)</li>
+        <li><span class="tag tag-fix">fix</span>Retired services (openclaw, prototypes, ssa-project) kept in config and now correctly report offline</li>
+        <li><span class="tag tag-ui">ui</span>Repo browser response cached in <code>localStorage</code> (3 h) with graceful fallback when GitHub is rate-limited or unreachable</li>
+        <li><span class="tag tag-ui">ui</span>Downloads header shows cache age and a <strong>↻</strong> button to force a fresh GitHub fetch</li>
+        <li><span class="tag tag-feat">feat</span>Optional <strong>Remember</strong> checkbox stores the write token in the browser so it doesn't need re-typing on every edit</li>
+        <li><span class="tag tag-feat">feat</span>Added <code>mac-api/sync-config.sh</code> to copy the live config into the repo copy and stop the two drifting apart</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Batch 2</span>
         <span class="entry-date">2026-05-29</span>
       </div>
       <ul class="changes">

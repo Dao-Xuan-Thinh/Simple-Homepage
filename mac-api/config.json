@@ -10,13 +10,22 @@
       "visibility": "private"
     },
     {
-      "id": "openclaw",
-      "name": "OpenClaw",
+      "id": "p-cal",
+      "name": "P-Cal",
+      "icon": "▦",
+      "desc": "Self-hosted calendar",
+      "url": "https://my-biggest-beefsteak.tail437237.ts.net:8444",
+      "check_url": "https://my-biggest-beefsteak.tail437237.ts.net:8444",
+      "visibility": "private"
+    },
+    {
+      "id": "prototype",
+      "name": "Prototype",
       "icon": "🐾",
       "desc": "Server management dashboard",
       "url": "https://my-biggest-beefsteak.tail437237.ts.net",
       "check_url": "https://my-biggest-beefsteak.tail437237.ts.net",
-      "visibility": "private"
+      "visibility": "public"
     },
     {
       "id": "study-portal",
@@ -28,13 +37,13 @@
       "visibility": "public"
     },
     {
-      "id": "prototype",
-      "name": "Prototype",
-      "icon": "🧪",
+      "id": "openclaw",
+      "name": "Openclaw",
+      "icon": ":3",
       "desc": "Experimental & WIP builds",
       "url": "https://my-biggest-beefsteak.tail437237.ts.net:10000/",
       "check_url": "https://my-biggest-beefsteak.tail437237.ts.net:10000/",
-      "visibility": "public"
+      "visibility": "private"
     },
     {
       "id": "standby",
@@ -52,42 +61,82 @@
       "name": "Immich",
       "detail": ":2283",
       "port": 2283,
+      "check_url": null,
       "docker": "immich_server",
       "containers": [
-        {"label": "Server",   "docker": "immich_server"},
-        {"label": "Database", "docker": "immich-database"},
-        {"label": "ML",       "docker": "immich_machine_learning"},
-        {"label": "Redis",    "docker": "redis"}
+        {
+          "label": "Server",
+          "docker": "immich_server"
+        },
+        {
+          "label": "PostGres",
+          "docker": "immich_postgres"
+        },
+        {
+          "label": "ML",
+          "docker": "immich_machine_learning"
+        },
+        {
+          "label": "Redis",
+          "docker": "immich_redis"
+        }
       ],
-      "log_file": null,
-      "check_url": null
+      "log_file": null
     },
     {
-      "id": "openclaw",
-      "name": "OpenClaw",
+      "id": "p-cal",
+      "name": "P-Cal",
+      "detail": ":3100",
+      "port": 3100,
+      "check_url": null,
+      "docker": "p-calendar",
+      "log_file": null
+    },
+    {
+      "id": "rustdesk",
+      "name": "RustDesk Relay",
+      "detail": ":21116",
+      "port": 21116,
+      "check_url": null,
+      "docker": "hbbs",
+      "containers": [
+        {
+          "label": "Signal (hbbs)",
+          "docker": "hbbs"
+        },
+        {
+          "label": "Relay (hbbr)",
+          "docker": "hbbr"
+        }
+      ],
+      "log_file": null
+    },
+    {
+      "id": "prototypes",
+      "name": "Prototypes",
       "detail": ":3000",
       "port": 3000,
+      "check_url": null,
       "docker": "openclaw",
-      "log_file": null,
-      "check_url": null
+      "log_file": null
     },
     {
-      "id": "projects",
+      "id": "ssa-project",
       "name": "SSA Project",
       "detail": ":8080",
       "port": 8080,
+      "check_url": null,
       "docker": null,
-      "log_file": null,
-      "check_url": null
+      "log_file": null
     },
     {
-      "id": "proto",
-      "name": "Prototypes",
-      "detail": ":4000",
-      "port": 4000,
+      "id": "openclaw",
+      "name": "Openclaw",
+      "detail": ":10000",
+      "port": 10000,
+      "check_url": "https://my-biggest-beefsteak.tail437237.ts.net:10000",
       "docker": null,
-      "log_file": null,
-      "check_url": null
+      "log_file": null
     }
   ]
 }

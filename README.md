@@ -1,6 +1,6 @@
 # Simple Homepage Dashboard
 
-A personal dashboard hosted on GitHub Pages that provides centralized access to self-hosted services, live system stats from a Mac mini, and real-time Docker logs. No code changes needed — manage everything through a web-based settings modal.
+A personal dashboard hosted on GitHub Pages that provides centralized access to self-hosted services, live system stats from a Mac mini, real-time Docker logs, and a self-updating list of downloadable GitHub projects. No code changes needed — manage services through a web-based settings modal, and downloads sync themselves straight from GitHub.
 
 **Live Demo**: https://dao-xuan-thinh.github.io/Simple-Homepage/
 
@@ -13,6 +13,14 @@ A personal dashboard hosted on GitHub Pages that provides centralized access to 
 - Auto health-checks via configurable URLs
 - Public and private project visibility
 - Status badges: **Online** 🟢 / **Offline** 🔴 / **Warning** 🟡
+
+### ↓ Downloads (auto-synced from GitHub)
+- A self-updating grid of your downloadable GitHub projects — **no config editing, ever**
+- Fetched client-side from the GitHub API; push a new repo and it appears on its own
+- Each card shows language, star count, last-updated date, plus **Code** / **ZIP** / **Releases** links
+- Forks and website repos (already shown as Project Links) are filtered out via a small ignore-list in `app.js`
+- Response cached in `localStorage` (3 h) with a graceful fallback when GitHub is rate-limited or unreachable
+- Header shows how old the cached list is, with a **↻** button to force a fresh fetch right after pushing a repo
 
 ### 📡 Service Status Dashboard
 - Real-time CPU, RAM, Disk, Swap, and Network stats from your Mac mini
@@ -33,7 +41,9 @@ Three tabs for web-based configuration (no code edits needed):
 - **📡 Services** — manage services, ports, and Docker containers
 - **📋 Logs** — configure which Docker containers appear in the log viewer
 
-Changes are saved to the Mac mini's `config.json` and persist across restarts.
+Changes are saved to the Mac mini's `config.json` and persist across restarts. Tick **Remember** next
+to the write-token field to store it in this browser so you don't retype it on every edit (opt-in;
+untick to forget it immediately).
 
 ### 🌓 Theme Support
 - Light and Dark modes with smooth transitions
@@ -196,6 +206,22 @@ python3 server.py
 - `docker`: Primary Docker container name (logs will use this by default)
 - `containers`: Array of additional containers to expose in the log viewer
 - `visibility`: "public" or "private" (projects only — private hidden on dashboard)
+
+### Downloads Section (GitHub auto-sync)
+
+The Downloads grid is driven entirely client-side — no `config.json`, no write token. Configure it via
+constants near the top of `app.js`:
+
+```javascript
+const GITHUB_USER = 'Dao-Xuan-Thinh';          // whose public repos to list
+const DOWNLOAD_IGNORE = new Set([              // repos to hide (websites, this dashboard, …)
+  'Simple-Homepage', 'Study-Portal', 'Simple-StandBy', 'Prototype_Web',
+]);
+```
+
+Forks are dropped automatically. Everything else appears on its own — make a new tool repo and it shows
+up on the next load. Results are cached in `localStorage` for 3 hours to stay under GitHub's
+unauthenticated rate limit (60 requests/hour per IP).
 
 ### Environment Variables
 
@@ -385,6 +411,16 @@ python3 -m http.server 8000
 open http://localhost:8000
 ```
 
+### Keeping the config in sync
+The running server reads a **live** `config.json` that lives outside this repo (the settings modal
+writes to it). To pull that live copy back into the committed template so they don't drift:
+```bash
+cd mac-api
+./sync-config.sh                 # or: ./sync-config.sh /path/to/live/config.json
+git diff -- mac-api/config.json  # review, then commit
+```
+The script validates the JSON before copying and no-ops if they already match.
+
 ### Project Structure
 ```
 ├── index.html              # Dashboard UI
@@ -395,7 +431,8 @@ open http://localhost:8000
 │       └── changelog.html  # Feature history
 ├── mac-api/
 │   ├── server.py           # Python API server
-│   └── config.json         # Config template
+│   ├── config.json         # Config template (keep in sync with the live copy)
+│   └── sync-config.sh      # Copy the live config into this repo copy
 └── README.md               # This file
 ```
 
@@ -434,5 +471,5 @@ MIT — Feel free to fork, modify, and use for personal projects.
 
 ---
 
-**Last Updated**: 2026-07-08  
-**Current Version**: Batch 2 (Multi-container logs + Settings modal)
+**Last Updated**: 2026-07-09  
+**Current Version**: Batch 3 (GitHub Downloads section + live service refresh)

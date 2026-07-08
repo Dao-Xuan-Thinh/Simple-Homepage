@@ -100,6 +100,19 @@
       </div>
     </section>
 
+    <!-- ── Downloads ─────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">
+        <span class="section-icon">↓</span> Downloads
+        <span class="badge badge-mock" id="badge-downloads">Loading…</span>
+        <button class="section-refresh" id="downloads-refresh" title="Re-fetch from GitHub" aria-label="Refresh downloads">↻</button>
+      </h2>
+      <!-- Populated dynamically by app.js from the GitHub API -->
+      <div class="cards-grid" id="downloads-grid">
+        <div class="card placeholder-card">Loading…</div>
+      </div>
+    </section>
+
     <!-- ── Server Status ─────────────────────────────────────── -->
     <section class="section">
       <h2 class="section-title">
@@ -201,6 +214,10 @@
         <div class="write-token-row">
           <label for="write-token">Write token:</label>
           <input type="password" id="write-token" placeholder="Enter write token to save" autocomplete="off" />
+          <label class="remember-token-wrap" title="Store the token in this browser so you don't retype it every time">
+            <input type="checkbox" id="remember-token" />
+            <span>Remember</span>
+          </label>
         </div>
         <div class="modal-footer-actions">
           <span class="save-status" id="save-status"></span>

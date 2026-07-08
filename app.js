@@ -131,6 +131,162 @@ function updateProjectStatuses(projArr) {
   });
 }
 
+/* ── Downloads (auto-synced from GitHub) ────────────────────────────
+   Fetches the owner's public repos straight from the GitHub API and
+   renders download cards. No backend, no config.json, no write token —
+   push a new repo and it shows up here on its own. */
+const GITHUB_USER    = 'Dao-Xuan-Thinh';
+const GH_CACHE_KEY   = 'gh_repos_cache_v1';
+const GH_CACHE_TTL   = 3 * 60 * 60 * 1000; // 3 hours
+
+// Repos to hide: websites already shown as project links + this dashboard.
+// (Forks are dropped separately, so their names don't need listing here.)
+const DOWNLOAD_IGNORE = new Set([
+  'Simple-Homepage',
+  'Study-Portal',
+  'Simple-StandBy',
+  'Prototype_Web',
+]);
+
+// GitHub's language colors (subset) for the language dot.
+const LANG_COLORS = {
+  Python:     '#3572A5',
+  JavaScript: '#f1e05a',
+  TypeScript: '#3178c6',
+  C:          '#555555',
+  'C++':      '#f34b7d',
+  Java:       '#b07219',
+  HTML:       '#e34c26',
+  CSS:        '#563d7c',
+  Shell:      '#89e051',
+};
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  return iso.slice(0, 10); // YYYY-MM-DD
+}
+
+function renderDownloadCards(repos) {
+  const grid = document.getElementById('downloads-grid');
+  if (!grid) return;
+  if (!repos.length) {
+    grid.innerHTML =
+      `<a class="card placeholder-card" href="https://github.com/${GITHUB_USER}" target="_blank" rel="noopener">Browse all repos on GitHub →</a>`;
+    return;
+  }
+  grid.innerHTML = repos.map(r => {
+    const lang    = r.language || '';
+    const color   = LANG_COLORS[lang] || '#8b8b8b';
+    const desc    = r.description || (lang ? `${lang} project` : 'GitHub repository');
+    const zipUrl  = `${r.html_url}/archive/refs/heads/${r.default_branch}.zip`;
+    const langBit = lang
+      ? `<span class="dl-lang"><span class="lang-dot" style="background:${color}"></span>${escapeHtml(lang)}</span>`
+      : '';
+    const starBit = r.stargazers_count
+      ? `<span class="dl-stat">★ ${r.stargazers_count}</span>`
+      : '';
+    return `
+      <div class="card download-card">
+        <div class="card-body">
+          <div class="card-name">
+            <a href="${escapeHtml(r.html_url)}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a>
+          </div>
+          <div class="card-desc">${escapeHtml(desc)}</div>
+          <div class="dl-meta">
+            ${langBit}
+            ${starBit}
+            <span class="dl-stat">updated ${escapeHtml(fmtDate(r.updated_at))}</span>
+          </div>
+        </div>
+        <div class="dl-actions">
+          <a href="${escapeHtml(r.html_url)}" target="_blank" rel="noopener">Code</a>
+          <a href="${escapeHtml(zipUrl)}" rel="noopener">ZIP</a>
+          <a href="${escapeHtml(r.html_url)}/releases" target="_blank" rel="noopener">Releases</a>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function curateRepos(raw) {
+  return raw
+    .filter(r => !r.fork && !DOWNLOAD_IGNORE.has(r.name))
+    .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+}
+
+function readRepoCache() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(GH_CACHE_KEY) || 'null');
+    if (cached && Array.isArray(cached.repos)) return cached;
+  } catch (_) { /* ignore malformed cache */ }
+  return null;
+}
+
+function fmtAge(ts) {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60)    return 'just now';
+  if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+function setDownloadBadge(text, state) {
+  const badge = document.getElementById('badge-downloads');
+  if (!badge) return;
+  badge.textContent = text;
+  badge.classList.remove('badge-mock', 'badge-live', 'badge-error');
+  badge.classList.add(state); // 'badge-live' | 'badge-error'
+}
+
+// force = true skips the cache and always re-fetches (the ↻ button).
+async function initDownloads(force = false) {
+  const cache = readRepoCache();
+  const fresh = cache && (Date.now() - cache.ts) < GH_CACHE_TTL;
+
+  // Serve fresh cache immediately without hitting the network.
+  if (!force && fresh) {
+    const repos = curateRepos(cache.repos);
+    renderDownloadCards(repos);
+    setDownloadBadge(`${repos.length} repos · ${fmtAge(cache.ts)}`, 'badge-live');
+    return;
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/users/${GITHUB_USER}/repos?per_page=100&sort=updated`,
+      { headers: { 'Accept': 'application/vnd.github+json' } }
+    );
+    if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+    const raw = await res.json();
+    localStorage.setItem(GH_CACHE_KEY, JSON.stringify({ ts: Date.now(), repos: raw }));
+    const repos = curateRepos(raw);
+    renderDownloadCards(repos);
+    setDownloadBadge(`${repos.length} repos · just now`, 'badge-live');
+  } catch (err) {
+    // Rate-limited or offline: fall back to any cached copy, however stale.
+    if (cache) {
+      const repos = curateRepos(cache.repos);
+      renderDownloadCards(repos);
+      setDownloadBadge(`${repos.length} repos · ${fmtAge(cache.ts)} (offline)`, 'badge-live');
+    } else {
+      renderDownloadCards([]);
+      setDownloadBadge("Can't reach GitHub", 'badge-error');
+    }
+  }
+}
+
+// Wire the manual refresh (↻) button on the Downloads header.
+const dlRefreshBtn = document.getElementById('downloads-refresh');
+if (dlRefreshBtn) {
+  dlRefreshBtn.addEventListener('click', async () => {
+    dlRefreshBtn.classList.add('spinning');
+    dlRefreshBtn.disabled = true;
+    setDownloadBadge('Refreshing…', 'badge-live');
+    await initDownloads(true);
+    dlRefreshBtn.classList.remove('spinning');
+    dlRefreshBtn.disabled = false;
+  });
+}
+
 /* ── Service cards ──────────────────────────────────────────────── */
 function renderServiceCards(services, svcArr = []) {
   const grid = document.getElementById('services-grid');
@@ -410,6 +566,24 @@ const modalClose   = document.getElementById('modal-close');
 const saveStatus   = document.getElementById('save-status');
 const btnSave      = document.getElementById('btn-save');
 const writeTokenEl = document.getElementById('write-token');
+const rememberTokenEl = document.getElementById('remember-token');
+const WRITE_TOKEN_KEY = 'homepage_write_token';
+
+// Prefill a remembered write token (opt-in — stored locally in this browser only).
+(function restoreWriteToken() {
+  const saved = localStorage.getItem(WRITE_TOKEN_KEY);
+  if (saved) {
+    writeTokenEl.value = saved;
+    if (rememberTokenEl) rememberTokenEl.checked = true;
+  }
+})();
+
+// Unchecking "Remember" forgets the stored token right away.
+if (rememberTokenEl) {
+  rememberTokenEl.addEventListener('change', () => {
+    if (!rememberTokenEl.checked) localStorage.removeItem(WRITE_TOKEN_KEY);
+  });
+}
 
 function openSettings() {
   populateSettingsModal(_config);
@@ -697,6 +871,10 @@ btnSave.addEventListener('click', async () => {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `HTTP ${res.status}`);
     }
+    // Remember the token for next time if opted in.
+    if (rememberTokenEl && rememberTokenEl.checked) {
+      localStorage.setItem(WRITE_TOKEN_KEY, token);
+    }
     // Update local config and re-render
     _config = newConfig;
     renderProjectCards(newConfig.projects);
@@ -731,6 +909,9 @@ btnSave.addEventListener('click', async () => {
   renderProjectCards(_config.projects);
   renderServiceCards(_config.services);
   populateLogSelector(_config.services);
+
+  // 1b. Downloads — sourced from GitHub, independent of the Mac mini API
+  initDownloads();
 
   // 2. Load stats
   const statsOk = await fetchAndRenderStats();
