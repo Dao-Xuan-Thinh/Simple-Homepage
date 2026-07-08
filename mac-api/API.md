@@ -1,0 +1,668 @@
+# API Documentation
+
+Complete reference for the Mac Mini Stats API.
+
+**Base URL**: `https://your-tailscale-hostname.ts.net:8443`  
+**Authentication**: Query parameter `?token=<API_TOKEN>` on all requests  
+**Server**: Python 3.7+ with `psutil` and `docker` libraries
+
+---
+
+## Table of Contents
+
+1. [Authentication](#authentication)
+2. [Rate Limits](#rate-limits)
+3. [Error Handling](#error-handling)
+4. [Endpoints](#endpoints)
+   - [GET /api/stats](#get-apistats)
+   - [GET /api/config](#get-apiconfig)
+   - [PUT /api/config](#put-apiconfig)
+   - [GET /api/services](#get-apiservices)
+   - [GET /api/logs](#get-apilogs)
+5. [Response Formats](#response-formats)
+6. [Examples](#examples)
+
+---
+
+## Authentication
+
+All endpoints require a valid API token passed as a query parameter:
+
+```
+GET /api/stats?token=3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80
+```
+
+### Token Types
+
+| Token | Purpose | Source | Required in Code |
+|-------|---------|--------|-------------------|
+| **Read Token** | Query stats, config, logs | Generated on server start | `app.js` (public) |
+| **Write Token** | Modify config via PUT | `HOMEPAGE_WRITE_TOKEN` env var | User enters in settings modal |
+
+### Missing or Invalid Token
+
+```
+HTTP 401 Unauthorized
+
+{
+  "error": "Invalid or missing token"
+}
+```
+
+---
+
+## Rate Limits
+
+- **Stats polling**: 5-10 second intervals (set in `app.js`)
+- **Status checks**: Every 30 seconds (background thread on server)
+- **Log refresh**: Every 10 seconds
+- **Config save**: No limit, but `PUT /api/config` triggers a one-shot health check
+
+*No hard rate limiting — use reasonable poll intervals to avoid overwhelming the server.*
+
+---
+
+## Error Handling
+
+All errors return JSON with `error` key and appropriate HTTP status:
+
+### HTTP Status Codes
+
+| Status | Meaning |
+|--------|---------|
+| `200` | Success |
+| `400` | Bad Request (invalid parameters, missing required fields) |
+| `401` | Unauthorized (invalid/missing token) |
+| `404` | Not Found (unknown service ID) |
+| `500` | Server Error (exception during processing) |
+
+### Example Error Response
+
+```json
+{
+  "error": "Invalid service: unknown_service"
+}
+```
+
+---
+
+## Endpoints
+
+### GET /api/stats
+
+Fetch current system statistics from the Mac Mini.
+
+**URL**: `/api/stats?token=<TOKEN>`
+
+**Query Parameters**: None (token required)
+
+**Response (200 OK):**
+
+```json
+{
+  "cpu": 35,
+  "ram": 62,
+  "ram_used_gb": 8.2,
+  "ram_total_gb": 16,
+  "swap": 10,
+  "swap_used_gb": 0.5,
+  "swap_total_gb": 4,
+  "disk": 75,
+  "disk_used_gb": 450,
+  "disk_total_gb": 600,
+  "disk_read_mbs": 15.2,
+  "disk_write_mbs": 8.5,
+  "uptime": 345600,
+  "net_tx": 512,
+  "net_rx": 256,
+  "temp": null,
+  "thermal_pressure": "Moderate",
+  "cpu_freq_ghz": 3.2
+}
+```
+
+**Field Descriptions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cpu` | int | CPU usage percentage (0–100) |
+| `ram` | int | RAM usage percentage (0–100) |
+| `ram_used_gb` | float | RAM used in gigabytes |
+| `ram_total_gb` | float | Total RAM in gigabytes |
+| `swap` | int | Swap usage percentage (0–100), or `null` if unavailable |
+| `swap_used_gb` | float | Swap used in gigabytes |
+| `swap_total_gb` | float | Total swap in gigabytes |
+| `disk` | int | Disk usage percentage for root volume (0–100) |
+| `disk_used_gb` | float | Disk used in gigabytes |
+| `disk_total_gb` | float | Total disk in gigabytes |
+| `disk_read_mbs` | float | Disk read speed in MB/s |
+| `disk_write_mbs` | float | Disk write speed in MB/s |
+| `uptime` | int | System uptime in seconds |
+| `net_tx` | int | Network transmit rate in KB/s |
+| `net_rx` | int | Network receive rate in KB/s |
+| `temp` | float or null | CPU temperature in °C (Intel only; null on Apple Silicon) |
+| `thermal_pressure` | string | Thermal status: "Nominal", "Moderate", "Heavy", or "Sleeping" (Apple Silicon) |
+| `cpu_freq_ghz` | float | Current CPU frequency in GHz |
+
+**Notes:**
+- Apple Silicon M4 (like Mac mini M4) does NOT expose CPU die temperature via any macOS API
+- `temp` will be `null` on Apple Silicon; use `thermal_pressure` as a substitute
+- `swap_used_gb` may be 0 on systems with minimal swap
+- All KB/s values are instantaneous (not averages)
+
+**Refresh Rate**: Call every 5–10 seconds for smooth updates
+
+---
+
+### GET /api/config
+
+Fetch the current configuration (projects and services).
+
+**URL**: `/api/config?token=<TOKEN>`
+
+**Query Parameters**: None (token required)
+
+**Response (200 OK):**
+
+```json
+{
+  "projects": [
+    {
+      "id": "my-github",
+      "name": "My GitHub",
+      "icon": "🐙",
+      "desc": "GitHub profile",
+      "url": "https://github.com/username",
+      "check_url": "https://github.com/username",
+      "visibility": "public"
+    },
+    {
+      "id": "private-wiki",
+      "name": "Private Wiki",
+      "icon": "📖",
+      "desc": "Internal documentation",
+      "url": "http://wiki.local:3000",
+      "check_url": "http://wiki.local:3000/health",
+      "visibility": "private"
+    }
+  ],
+  "services": [
+    {
+      "id": "immich",
+      "name": "Immich",
+      "detail": ":2283",
+      "port": 2283,
+      "docker": "immich_server",
+      "containers": [
+        {"label": "Server", "docker": "immich_server"},
+        {"label": "Database", "docker": "immich-database"},
+        {"label": "ML", "docker": "immich_machine_learning"},
+        {"label": "Redis", "docker": "redis"}
+      ],
+      "log_file": null,
+      "check_url": null
+    }
+  ]
+}
+```
+
+**Field Descriptions (Projects):**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Unique identifier, URL-safe (no spaces) |
+| `name` | string | Yes | Display name on dashboard |
+| `icon` | string | Yes | Emoji icon (1–4 characters) |
+| `desc` | string | No | Description/subtitle |
+| `url` | string | Yes | Link to the project |
+| `check_url` | string | No | Health check URL (defaults to `url` if omitted) |
+| `visibility` | string | Yes | "public" (visible) or "private" (hidden) |
+
+**Field Descriptions (Services):**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Unique identifier, URL-safe |
+| `name` | string | Yes | Display name on dashboard |
+| `detail` | string | No | Subtitle (e.g., port number ":2283") |
+| `port` | int | No | TCP port for health checks (1–65535) |
+| `docker` | string | No | Primary Docker container name for logs |
+| `containers` | array | No | List of `{label, docker}` objects for multi-container support |
+| `log_file` | string | No | Path to a log file (fallback if Docker unavailable) |
+| `check_url` | string | No | HTTP URL for health checks |
+
+**Refresh Rate**: Call on app startup; cache client-side. Refetch after `PUT /api/config`.
+
+---
+
+### PUT /api/config
+
+Update the configuration (projects and services). Requires write token.
+
+**URL**: `/api/config?token=<WRITE_TOKEN>`
+
+**Query Parameters:**
+- `token`: Write token from `HOMEPAGE_WRITE_TOKEN` env var (required)
+
+**Request Body:**
+
+```json
+{
+  "projects": [
+    {
+      "id": "new-project",
+      "name": "New Project",
+      "icon": "✨",
+      "desc": "A new project",
+      "url": "https://example.com",
+      "check_url": "https://example.com/health",
+      "visibility": "public"
+    }
+  ],
+  "services": [
+    {
+      "id": "nginx",
+      "name": "Nginx",
+      "detail": ":80",
+      "port": 80,
+      "docker": "nginx",
+      "containers": [{"label": "Web", "docker": "nginx"}],
+      "log_file": null,
+      "check_url": null
+    }
+  ]
+}
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "message": "Config saved successfully"
+}
+```
+
+**Validation Rules:**
+
+- `projects` and `services` must be arrays (can be empty)
+- Each project must have unique `id`
+- Each service must have unique `id`
+- `id` must be URL-safe (alphanumeric, hyphens, underscores only)
+- `name` must be non-empty
+- `icon` must be 1–4 characters (emoji recommended)
+- `url` must be a valid URL (projects only)
+- `check_url` must be a valid URL if provided
+- `port` must be 1–65535 if provided
+- `visibility` must be "public" or "private"
+- `containers` array items must have non-empty `docker` names
+
+**Error Responses:**
+
+```json
+{
+  "error": "Invalid token"
+}
+```
+(HTTP 401)
+
+```json
+{
+  "error": "Invalid project id: contains spaces"
+}
+```
+(HTTP 400)
+
+```json
+{
+  "error": "Duplicate service id: immich"
+}
+```
+(HTTP 400)
+
+**Side Effects:**
+- Config written to `config.json` on disk
+- Background status-check thread triggers a one-shot health check for all services
+- Any existing service health cache is cleared
+
+---
+
+### GET /api/services
+
+Fetch service status from the last background health check.
+
+**URL**: `/api/services?token=<TOKEN>`
+
+**Query Parameters**: None (token required)
+
+**Response (200 OK):**
+
+```json
+{
+  "services": [
+    {
+      "id": "immich",
+      "name": "Immich",
+      "status": "online",
+      "last_check": "2026-07-08T17:10:15.234Z"
+    },
+    {
+      "id": "nginx",
+      "name": "Nginx",
+      "status": "offline",
+      "last_check": "2026-07-08T17:10:10.456Z"
+    }
+  ]
+}
+```
+
+**Field Descriptions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Service ID from config |
+| `name` | string | Service name from config |
+| `status` | string | Health status: "online", "offline", "warning", or "unknown" |
+| `last_check` | string | ISO 8601 timestamp of last health check |
+
+**Status Meanings:**
+
+| Status | Meaning |
+|--------|---------|
+| `online` | Service responded successfully to health check |
+| `offline` | Service did not respond or connection refused |
+| `warning` | Service responded with error (e.g., HTTP 500) but is reachable |
+| `unknown` | No health check configured (no `port` or `check_url`) |
+
+**Refresh Rate**: Call every 30 seconds (matches background check interval)
+
+---
+
+### GET /api/logs
+
+Fetch Docker container logs or log file contents.
+
+**URL**: `/api/logs?service=<SERVICE_ID>&lines=50&container=<DOCKER_NAME>&token=<TOKEN>`
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `service` | string | immich | Service ID from config |
+| `lines` | int | 50 | Number of log lines to return (1–500) |
+| `container` | string | (optional) | Docker container name; overrides service's primary container |
+| `token` | string | (required) | API read token |
+
+**Examples:**
+
+```
+# Last 50 lines from Immich's primary container (immich_server)
+GET /api/logs?service=immich&lines=50&token=TOKEN
+
+# Last 100 lines from Immich's database container
+GET /api/logs?service=immich&lines=100&container=immich-database&token=TOKEN
+
+# Last 20 lines from a different service
+GET /api/logs?service=nginx&lines=20&token=TOKEN
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "service": "immich",
+  "lines": [
+    {
+      "timestamp": "2026-07-08T17:10:15.234Z",
+      "level": "INFO",
+      "msg": "Starting Immich server v1.102.1",
+      "raw": "[2026-07-08 17:10:15.234] INFO: Starting Immich server v1.102.1"
+    },
+    {
+      "timestamp": "2026-07-08T17:10:16.512Z",
+      "level": "INFO",
+      "msg": "Connected to database",
+      "raw": "[2026-07-08 17:10:16.512] INFO: Connected to database"
+    },
+    {
+      "timestamp": "2026-07-08T17:10:17.001Z",
+      "level": "WARN",
+      "msg": "High memory usage detected",
+      "raw": "[2026-07-08 17:10:17.001] WARN: High memory usage detected"
+    }
+  ]
+}
+```
+
+**Field Descriptions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `service` | string | Service ID |
+| `lines` | array | Array of log entries |
+| `timestamp` | string | Extracted timestamp (ISO 8601), or current time if unparseable |
+| `level` | string | Log level: INFO, WARN, ERROR, DEBUG, or "UNKNOWN" |
+| `msg` | string | Parsed log message (stripped of timestamp/level prefix) |
+| `raw` | string | Original log line as received |
+
+**Error Responses:**
+
+```json
+{
+  "error": "Unknown service: invalid_id"
+}
+```
+(HTTP 404)
+
+```json
+{
+  "service": "immich",
+  "lines": [],
+  "warning": "No log source available. Set 'docker' container name or 'log_file' path in config.json."
+}
+```
+(HTTP 200 — no logs available but valid service)
+
+**Log Parsing:**
+
+The server attempts to parse timestamps and log levels from various formats:
+- Docker JSON logs: Extracts ISO timestamp and message
+- Syslog: Parses `TIMESTAMP LEVEL: MESSAGE` format
+- Python/Node.js: Handles `[TIMESTAMP] LEVEL: MESSAGE` format
+- Fallback: Uses entire line as message if parsing fails
+
+**Limits:**
+- `lines` clamped to 1–500 (default 50)
+- Timeout: 10 seconds for Docker logs, 5 seconds for log files
+- Max response size: ~10 MB (depends on line length)
+
+**Refresh Rate**: Call every 10 seconds for live log updates
+
+---
+
+### GET /api/health (bonus)
+
+Simple health check endpoint (no token required).
+
+**URL**: `/api/health`
+
+**Response (200 OK):**
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-07-08T17:10:15.234Z"
+}
+```
+
+**Use**: Quick check if API is reachable (useful for monitoring/alerting).
+
+---
+
+## Response Formats
+
+### Pagination
+
+*Not currently implemented.* All endpoints return complete data. For large configs or logs, consider filtering client-side.
+
+### Timestamps
+
+All timestamps are **ISO 8601 format** (e.g., `2026-07-08T17:10:15.234Z`).
+
+```javascript
+new Date('2026-07-08T17:10:15.234Z')
+```
+
+### Numeric Values
+
+- **Percentages**: 0–100 integer (no % symbol)
+- **GB values**: Float (e.g., `8.2`, `16.0`)
+- **Rates (KB/s, MB/s)**: Float (e.g., `512.5`, `15.2`)
+- **Uptime (seconds)**: Integer (e.g., `345600`)
+- **Ports**: Integer 1–65535
+- **Frequencies**: Float in GHz (e.g., `3.2`)
+
+---
+
+## Examples
+
+### JavaScript (Fetch API)
+
+```javascript
+const BASE_URL = 'https://my-biggest-beefsteak.tail437237.ts.net:8443';
+const API_TOKEN = '3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80';
+
+// Fetch stats
+async function getStats() {
+  const res = await fetch(`${BASE_URL}/api/stats?token=${API_TOKEN}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// Fetch logs
+async function getLogs(serviceId, containerName = null) {
+  let url = `${BASE_URL}/api/logs?service=${serviceId}&lines=50&token=${API_TOKEN}`;
+  if (containerName) url += `&container=${encodeURIComponent(containerName)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// Update config (requires write token)
+async function saveConfig(newConfig, writeToken) {
+  const res = await fetch(`${BASE_URL}/api/config?token=${writeToken}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newConfig)
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// Usage
+try {
+  const stats = await getStats();
+  console.log('CPU:', stats.cpu, '%');
+  console.log('RAM:', stats.ram, '%');
+  console.log('Thermal:', stats.thermal_pressure);
+} catch (err) {
+  console.error('Error fetching stats:', err);
+}
+```
+
+### Python (requests)
+
+```python
+import requests
+import json
+
+BASE_URL = 'https://my-biggest-beefsteak.tail437237.ts.net:8443'
+API_TOKEN = '3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80'
+
+# Fetch stats
+response = requests.get(f'{BASE_URL}/api/stats', params={'token': API_TOKEN})
+stats = response.json()
+print(f"CPU: {stats['cpu']}%")
+print(f"RAM: {stats['ram']}%")
+
+# Fetch logs
+response = requests.get(f'{BASE_URL}/api/logs', params={
+    'service': 'immich',
+    'lines': 50,
+    'container': 'immich-database',
+    'token': API_TOKEN
+})
+logs = response.json()
+for line in logs['lines'][:5]:
+    print(f"[{line['level']}] {line['msg']}")
+
+# Update config
+new_config = {
+    'projects': [...],
+    'services': [...]
+}
+response = requests.put(
+    f'{BASE_URL}/api/config',
+    params={'token': WRITE_TOKEN},
+    json=new_config,
+    headers={'Content-Type': 'application/json'}
+)
+result = response.json()
+print(result['message'])
+```
+
+### cURL
+
+```bash
+# Fetch stats
+curl 'https://my-biggest-beefsteak.tail437237.ts.net:8443/api/stats?token=3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80'
+
+# Fetch logs with container
+curl 'https://my-biggest-beefsteak.tail437237.ts.net:8443/api/logs?service=immich&lines=20&container=immich-database&token=3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80'
+
+# Update config
+curl -X PUT \
+  -H 'Content-Type: application/json' \
+  -d '{"projects":[],"services":[]}' \
+  'https://my-biggest-beefsteak.tail437237.ts.net:8443/api/config?token=WRITE_TOKEN'
+```
+
+---
+
+## Server Implementation Details
+
+### Technologies
+
+- **Language**: Python 3.7+
+- **Web Framework**: `http.server.BaseHTTPRequestHandler` (built-in)
+- **System Stats**: `psutil` library
+- **Docker Access**: `docker` library (requires Docker socket)
+- **Background Thread**: `threading.Thread` for periodic health checks
+
+### Performance
+
+- **Startup Time**: ~2 seconds (including Docker connection)
+- **Stats Gathering**: ~100–200 ms per `/api/stats` call
+- **Health Check**: ~100–500 ms per service (depends on network latency)
+- **Log Fetching**: ~500 ms–2 seconds (depends on container size)
+
+### Concurrency
+
+- Server handles concurrent requests via multi-threading
+- Stats calls are read-only (no locking required)
+- Config updates are serialized (file-level locking)
+- Health checks run in background thread (no blocking)
+
+### Storage
+
+- Config saved to `config.json` in the server directory
+- No database; everything is JSON
+- Changes persist across restarts
+
+---
+
+**Last Updated**: 2026-07-08  
+**API Version**: 1.0 (Batch 2)
