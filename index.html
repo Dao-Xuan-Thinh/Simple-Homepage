@@ -45,6 +45,7 @@
       </h2>
       <div class="cards-grid stats-grid">
 
+        <!-- Processing -->
         <div class="card stat-card">
           <div class="stat-label">CPU Usage</div>
           <div class="stat-value" id="stat-cpu">—</div>
@@ -52,6 +53,13 @@
           <div class="stat-sub" id="stat-cpu-freq"></div>
         </div>
 
+        <div class="card stat-card">
+          <div class="stat-label">Load Average</div>
+          <div class="stat-value" id="stat-load">—</div>
+          <div class="stat-sub" id="stat-load-sub">1m · 5m · 15m</div>
+        </div>
+
+        <!-- Memory -->
         <div class="card stat-card">
           <div class="stat-label">RAM Usage</div>
           <div class="stat-value" id="stat-ram">—</div>
@@ -66,23 +74,24 @@
           <div class="stat-sub" id="stat-swap-detail"></div>
         </div>
 
-        <div class="card stat-card">
-          <div class="stat-label">Disk Usage</div>
-          <div class="stat-value" id="stat-disk">—</div>
-          <div class="stat-bar-wrap"><div class="stat-bar" id="bar-disk"></div></div>
-          <div class="stat-sub" id="stat-disk-detail"></div>
-        </div>
-
-        <div class="card stat-card">
-          <div class="stat-label">Disk I/O</div>
-          <div class="stat-value" id="stat-diskio">—</div>
-          <div class="stat-sub">Read / Write per second</div>
-        </div>
-
+        <!-- Thermal & power -->
         <div class="card stat-card">
           <div class="stat-label">Thermal</div>
           <div class="stat-value" id="stat-temp">—</div>
           <div class="stat-sub">temp · pressure level</div>
+        </div>
+
+        <div class="card stat-card">
+          <div class="stat-label">Power</div>
+          <div class="stat-value" id="stat-power">—</div>
+          <div class="stat-sub" id="stat-power-sub">est. wall draw</div>
+        </div>
+
+        <!-- Throughput -->
+        <div class="card stat-card">
+          <div class="stat-label">Disk I/O</div>
+          <div class="stat-value" id="stat-diskio">—</div>
+          <div class="stat-sub">Read / Write per second</div>
         </div>
 
         <div class="card stat-card">
@@ -92,35 +101,25 @@
         </div>
 
         <div class="card stat-card">
-          <div class="stat-label">Uptime</div>
-          <div class="stat-value uptime" id="stat-uptime">—</div>
-          <div class="stat-sub">Mac mini M4 · macOS</div>
-        </div>
-
-        <div class="card stat-card">
-          <div class="stat-label">Power</div>
-          <div class="stat-value" id="stat-power">—</div>
-          <div class="stat-sub" id="stat-power-sub">est. wall draw</div>
-        </div>
-
-        <div class="card stat-card">
-          <div class="stat-label">Load Average</div>
-          <div class="stat-value" id="stat-load">—</div>
-          <div class="stat-sub" id="stat-load-sub">1m · 5m · 15m</div>
-        </div>
-
-        <div class="card stat-card">
           <div class="stat-label">Network Total</div>
           <div class="stat-value" id="stat-nettotal">—</div>
           <div class="stat-sub">↑ Sent ↓ Received (since boot)</div>
         </div>
 
+        <!-- System -->
         <div class="card stat-card">
           <div class="stat-label">Docker</div>
           <div class="stat-value" id="stat-docker">—</div>
           <div class="stat-sub">running / total containers</div>
         </div>
 
+        <div class="card stat-card">
+          <div class="stat-label">Uptime</div>
+          <div class="stat-value uptime" id="stat-uptime">—</div>
+          <div class="stat-sub">Mac mini M4 · macOS</div>
+        </div>
+
+        <!-- Storage (full width) -->
         <div class="card stat-card volumes-card">
           <div class="stat-label">Storage Volumes</div>
           <div class="volumes-list" id="volumes-list">

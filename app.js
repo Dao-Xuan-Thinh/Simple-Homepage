@@ -362,7 +362,6 @@ function populateLogSelector(services) {
 function renderStats(d) {
   const { cpu, ram, ram_used_gb, ram_total_gb,
           swap, swap_used_gb,
-          disk, disk_used_gb, disk_total_gb,
           disk_read_mbs, disk_write_mbs,
           uptime, net_tx, net_rx, temp, thermal_pressure, cpu_freq_ghz,
           load_1, load_5, load_15, cpu_cores,
@@ -376,7 +375,6 @@ function renderStats(d) {
   document.getElementById('stat-cpu').textContent  = cpu + '%';
   document.getElementById('stat-ram').textContent  = ram + '%';
   document.getElementById('stat-swap').textContent = swap != null ? swap + '%' : 'N/A';
-  document.getElementById('stat-disk').textContent = disk + '%';
   const tempEl = document.getElementById('stat-temp');
   if (temp != null) {
     tempEl.textContent = temp + '°C';
@@ -396,9 +394,6 @@ function renderStats(d) {
 
   const swapDetail = document.getElementById('stat-swap-detail');
   if (swapDetail && swap_used_gb != null) swapDetail.textContent = `${swap_used_gb} GB used`;
-
-  const diskDetail = document.getElementById('stat-disk-detail');
-  if (diskDetail && disk_used_gb != null) diskDetail.textContent = `${disk_used_gb} / ${disk_total_gb} GB`;
 
   const diskio = document.getElementById('stat-diskio');
   if (diskio) diskio.textContent = (disk_read_mbs != null)
@@ -447,7 +442,7 @@ function renderStats(d) {
   renderVolumes(volumes);
 
   // Reset text color (in case we were in error state)
-  ['stat-cpu','stat-ram','stat-swap','stat-disk','stat-temp','stat-net','stat-uptime','stat-diskio'].forEach(id => {
+  ['stat-cpu','stat-ram','stat-swap','stat-temp','stat-net','stat-uptime','stat-diskio'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.color = '';
   });
@@ -455,7 +450,6 @@ function renderStats(d) {
   setBar('bar-cpu',  cpu);
   setBar('bar-ram',  ram);
   setBar('bar-swap', swap ?? 0);
-  setBar('bar-disk', disk);
 }
 
 function renderVolumes(volumes) {
@@ -480,17 +474,17 @@ function renderVolumes(volumes) {
 }
 
 function renderStatsError() {
-  ['stat-cpu','stat-ram','stat-swap','stat-disk','stat-temp','stat-net','stat-uptime','stat-diskio',
+  ['stat-cpu','stat-ram','stat-swap','stat-temp','stat-net','stat-uptime','stat-diskio',
    'stat-power','stat-load','stat-nettotal','stat-docker'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.textContent = '—'; el.style.color = 'var(--offline)'; }
   });
-  ['stat-ram-detail','stat-swap-detail','stat-disk-detail','stat-cpu-freq',
+  ['stat-ram-detail','stat-swap-detail','stat-cpu-freq',
    'stat-power-sub','stat-load-sub'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = '';
   });
-  ['bar-cpu','bar-ram','bar-swap','bar-disk'].forEach(id => {
+  ['bar-cpu','bar-ram','bar-swap'].forEach(id => {
     const bar = document.getElementById(id);
     if (bar) bar.style.width = '0%';
   });
