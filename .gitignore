@@ -7,3 +7,6 @@ __pycache__/
 
 # Local server logs / temp
 *.log
+
+# Runtime state written by the API server (cumulative energy total) - not source
+energy.json

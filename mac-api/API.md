@@ -117,7 +117,22 @@ Fetch current system statistics from the Mac Mini.
   "net_rx": 256,
   "temp": null,
   "thermal_pressure": "Moderate",
-  "cpu_freq_ghz": 3.2
+  "cpu_freq_ghz": 3.2,
+  "load_1": 2.75,
+  "load_5": 3.46,
+  "load_15": 3.17,
+  "cpu_cores": 10,
+  "net_total_up_gb": 1.05,
+  "net_total_down_gb": 3.14,
+  "docker_running": 7,
+  "docker_total": 14,
+  "volumes": [
+    { "name": "Macintosh HD", "mount": "/System/Volumes/Data", "used_gb": 168.0, "total_gb": 228.3, "percent": 83.0, "internal": true },
+    { "name": "Backup", "mount": "/Volumes/Backup", "used_gb": 245.2, "total_gb": 952.2, "percent": 25.8, "internal": false }
+  ],
+  "power_w": 6.13,
+  "energy_wh": 142.6,
+  "energy_since": 1783603292
 }
 ```
 
@@ -132,7 +147,7 @@ Fetch current system statistics from the Mac Mini.
 | `swap` | int | Swap usage percentage (0–100), or `null` if unavailable |
 | `swap_used_gb` | float | Swap used in gigabytes |
 | `swap_total_gb` | float | Total swap in gigabytes |
-| `disk` | int | Disk usage percentage for root volume (0–100) |
+| `disk` | int | Disk usage percentage for the data volume (`/System/Volumes/Data` on macOS, 0–100) |
 | `disk_used_gb` | float | Disk used in gigabytes |
 | `disk_total_gb` | float | Total disk in gigabytes |
 | `disk_read_mbs` | float | Disk read speed in MB/s |
@@ -143,12 +158,22 @@ Fetch current system statistics from the Mac Mini.
 | `temp` | float or null | CPU temperature in °C (Intel only; null on Apple Silicon) |
 | `thermal_pressure` | string | Thermal status: "Nominal", "Moderate", "Heavy", or "Sleeping" (Apple Silicon) |
 | `cpu_freq_ghz` | float | Current CPU frequency in GHz |
+| `load_1` / `load_5` / `load_15` | float or null | Load average over 1 / 5 / 15 minutes |
+| `cpu_cores` | int | Logical CPU core count (context for load average) |
+| `net_total_up_gb` / `net_total_down_gb` | float | Cumulative network sent / received in GB since boot |
+| `docker_running` / `docker_total` | int or null | Running / total Docker containers (`null` if Docker is down) |
+| `volumes` | array | Per-volume disk usage: `{name, mount, used_gb, total_gb, percent, internal}`. Internal data volume + external drives under `/Volumes`; system/recovery volumes filtered out |
+| `power_w` | float | Estimated wall power draw in watts (idle base + measured SoC power) |
+| `energy_wh` | float | Cumulative energy in watt-hours since `energy_since`, persisted across restarts |
+| `energy_since` | int | Unix epoch when energy tracking began |
 
 **Notes:**
 - Apple Silicon M4 (like Mac mini M4) does NOT expose CPU die temperature via any macOS API
 - `temp` will be `null` on Apple Silicon; use `thermal_pressure` as a substitute
 - `swap_used_gb` may be 0 on systems with minimal swap
 - All KB/s values are instantaneous (not averages)
+- `disk` reads the data volume, not `/` (the sealed read-only system snapshot, which misreports as ~26%)
+- `power_w` / `energy_wh` are **estimates**: `powermetrics` only measures chip (SoC) power, so a fixed idle base (`IDLE_BASE_W` in `server.py`, default 6.0 W) is added to approximate true wall draw. Not a metered reading.
 
 **Refresh Rate**: Call every 5–10 seconds for smooth updates
 

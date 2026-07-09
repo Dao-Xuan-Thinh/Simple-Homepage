@@ -68,8 +68,24 @@
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <div class="entry">
       <div class="entry-header">
-        <span class="entry-title">Batch 3 — Downloads section &amp; server refresh</span>
+        <span class="entry-title">Batch 4 — Disk fix, power/energy &amp; more stats</span>
         <span class="badge badge-latest">Latest</span>
+        <span class="entry-date">2026-07-09</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-fix">fix</span>Disk Usage was reading the sealed macOS system snapshot (<code>/</code>, ~26%) instead of the real data volume — now reads <code>/System/Volumes/Data</code> and reports the true figure (~83%)</li>
+        <li><span class="tag tag-feat">feat</span>New <strong>Power</strong> card with a cumulative energy total that persists across restarts (<code>energy.json</code>) — estimated wall draw = tunable idle base + measured SoC power</li>
+        <li><span class="tag tag-feat">feat</span>New <strong>Load Average</strong> (1/5/15-min + core count), <strong>Network Total</strong> (GB since boot), and <strong>Docker</strong> (running / total containers) cards</li>
+        <li><span class="tag tag-feat">feat</span>New <strong>Storage Volumes</strong> card — per-volume usage bars for the internal drive and any external drives (e.g. a backup drive), with APFS system volumes filtered out</li>
+        <li><span class="tag tag-api">api</span><code>/api/stats</code> now returns <code>power_w</code>, <code>energy_wh</code>, <code>energy_since</code>, <code>load_1/5/15</code>, <code>cpu_cores</code>, <code>net_total_up_gb/down_gb</code>, and <code>docker_running/total</code></li>
+        <li><span class="tag tag-ui">ui</span>Energy label is honest — powermetrics only measures chip power, so the total is an <em>estimate</em> (idle base + SoC), not a metered wall reading</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Batch 3 — Downloads section &amp; server refresh</span>
         <span class="entry-date">2026-07-09</span>
       </div>
       <ul class="changes">

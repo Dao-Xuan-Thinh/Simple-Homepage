@@ -81,6 +81,22 @@ _config_lock  = threading.Lock()
 _status_cache = {"services": [], "projects": [], "ts": 0}
 _status_lock  = threading.Lock()
 
+# ── Energy tracking ───────────────────────────────────────────────────────────
+# The Mac mini has no battery, so we can't read true wall draw. powermetrics only
+# reports SoC (CPU+GPU+ANE) power, which is chip-only (~0.1 W idle). We estimate
+# wall draw as IDLE_BASE_W + measured SoC power and integrate it into a running
+# kWh total that persists across restarts in energy.json.
+#
+# IDLE_BASE_W is the assumed fixed overhead (PSU, DRAM, SSD, I/O, fans) that
+# powermetrics doesn't see. ~6 W is a reasonable Mac mini M4 idle figure; tune it
+# against a smart-plug reading if you ever measure the real wall draw.
+IDLE_BASE_W     = 6.0
+ENERGY_INTERVAL = 60  # seconds between power samples
+ENERGY_FILE     = os.path.join(os.path.dirname(CONFIG_FILE), "energy.json")
+
+_energy      = {"total_wh": 0.0, "since": int(time.time()), "power_w": 0.0}
+_energy_lock = threading.Lock()
+
 # ── Config helpers ────────────────────────────────────────────────────────────
 
 def load_config():
@@ -102,6 +118,78 @@ def save_config(data):
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
         os.replace(tmp, CONFIG_FILE)
+
+
+# ── Energy tracking helpers ────────────────────────────────────────────────────
+
+def load_energy():
+    """Load the persisted energy total into _energy. Starts fresh if absent/corrupt."""
+    try:
+        with open(ENERGY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        with _energy_lock:
+            _energy["total_wh"] = float(data.get("total_wh", 0.0))
+            _energy["since"]    = int(data.get("since", int(time.time())))
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        print(f"[energy] Failed to load {ENERGY_FILE}: {exc}")
+
+
+def save_energy(last_update):
+    """Atomically persist the running energy total."""
+    with _energy_lock:
+        data = {
+            "total_wh":    round(_energy["total_wh"], 4),
+            "since":       _energy["since"],
+            "last_update": int(last_update),
+        }
+    tmp = ENERGY_FILE + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, ENERGY_FILE)
+    except Exception as exc:
+        print(f"[energy] Failed to save {ENERGY_FILE}: {exc}")
+
+
+def get_soc_power_w():
+    """
+    Sample SoC power (CPU+GPU+ANE) via powermetrics. Returns watts, or None on failure.
+    This is chip-only power, not wall draw - see IDLE_BASE_W.
+    """
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "powermetrics", "--samplers", "cpu_power", "-n", "1", "-i", "1000"],
+            capture_output=True, text=True, timeout=10,
+        )
+        m = re.search(r"Combined Power \(CPU \+ GPU \+ ANE\):\s*([\d.]+)\s*mW", result.stdout)
+        if m:
+            return float(m.group(1)) / 1000.0
+    except Exception:
+        pass
+    return None
+
+
+def energy_loop():
+    """
+    Background thread: every ENERGY_INTERVAL seconds, sample power and integrate
+    it into the persisted kWh total. Estimated wall draw = IDLE_BASE_W + SoC power.
+    Downtime is not counted - dt is capped so sleep/off gaps don't spike the total.
+    """
+    load_energy()
+    last_update = time.time()
+    while True:
+        time.sleep(ENERGY_INTERVAL)
+        soc_w = get_soc_power_w()
+        now = time.time()
+        dt = min(now - last_update, 5 * ENERGY_INTERVAL)  # cap gaps (sleep/downtime)
+        wall_w = IDLE_BASE_W + (soc_w if soc_w is not None else 0.0)
+        with _energy_lock:
+            _energy["total_wh"] += wall_w * (dt / 3600.0)
+            _energy["power_w"]   = round(wall_w, 2)
+        save_energy(now)
+        last_update = now
 
 
 # ── Status checking ────────────────────────────────────────────────────────────
@@ -267,11 +355,76 @@ def get_thermal_pressure():
     return None
 
 
+def get_docker_counts():
+    """Return (running, total) Docker container counts, or (None, None) if unavailable."""
+    def _count(args):
+        result = subprocess.run(["docker"] + args, capture_output=True, text=True, timeout=5)
+        return len([l for l in result.stdout.splitlines() if l.strip()])
+    try:
+        return _count(["ps", "-q"]), _count(["ps", "-aq"])
+    except Exception:
+        return None, None
+
+
+# Internal APFS plumbing / recovery to hide from the per-volume breakdown.
+_HIDDEN_VOLUMES = {"/Volumes/Recovery"}
+# Real user-facing filesystems (skip devfs/nullfs/autofs and other pseudo mounts).
+_REAL_FSTYPES   = {"apfs", "hfs", "hfsplus", "exfat", "msdos", "ntfs", "ufsd_ntfs"}
+
+def _volume_entry(name, mount, internal):
+    u = psutil.disk_usage(mount)
+    return {
+        "name":     name,
+        "mount":    mount,
+        "used_gb":  round(u.used  / 1024**3, 1),
+        "total_gb": round(u.total / 1024**3, 1),
+        "percent":  round(u.percent, 1),
+        "internal": internal,
+    }
+
+def get_disk_volumes():
+    """
+    Per-volume disk usage: the internal data volume plus any external drives
+    mounted under /Volumes. Skips the sealed system volumes and APFS plumbing.
+    """
+    vols = []
+
+    # Internal data volume ("/" is the sealed read-only snapshot, so prefer Data)
+    for mount in ("/System/Volumes/Data", "/"):
+        try:
+            vols.append(_volume_entry("Macintosh HD", mount, True))
+            break
+        except Exception:
+            continue
+
+    # External / other real volumes mounted under /Volumes
+    try:
+        for p in psutil.disk_partitions(all=False):
+            mp = p.mountpoint
+            if not mp.startswith("/Volumes/") or mp in _HIDDEN_VOLUMES:
+                continue
+            if p.fstype.lower() not in _REAL_FSTYPES:
+                continue
+            try:
+                vols.append(_volume_entry(os.path.basename(mp) or mp, mp, False))
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return vols
+
+
 def get_stats():
     cpu = psutil.cpu_percent(interval=0.5)
     ram = psutil.virtual_memory()
     swap = psutil.swap_memory()
-    disk = psutil.disk_usage("/")
+    # On macOS, "/" is the sealed read-only system snapshot (~26% used); the real
+    # user data lives on the Data volume. Fall back to "/" on Intel / non-APFS.
+    try:
+        disk = psutil.disk_usage("/System/Volumes/Data")
+    except Exception:
+        disk = psutil.disk_usage("/")
 
     disk_before = psutil.disk_io_counters()
     net_before  = psutil.net_io_counters()
@@ -310,6 +463,29 @@ def get_stats():
     # Thermal pressure - always works on Apple Silicon M4 even when temp is None
     thermal_pressure = get_thermal_pressure()
 
+    # Load average + core count
+    try:
+        load1, load5, load15 = os.getloadavg()
+    except OSError:
+        load1 = load5 = load15 = None
+    cpu_cores = psutil.cpu_count()
+
+    # Cumulative network totals since boot (reuse net_after, no extra syscall)
+    net_total_up_gb   = round(net_after.bytes_sent / 1024**3, 2)
+    net_total_down_gb = round(net_after.bytes_recv / 1024**3, 2)
+
+    # Docker container counts (None if Docker isn't running)
+    docker_running, docker_total = get_docker_counts()
+
+    # Per-volume disk breakdown (internal + external drives)
+    volumes = get_disk_volumes()
+
+    # Energy snapshot (accumulated by energy_loop)
+    with _energy_lock:
+        power_w      = _energy["power_w"]
+        energy_wh    = round(_energy["total_wh"], 1)
+        energy_since = _energy["since"]
+
     return {
         "cpu":          round(cpu, 1),
         "ram":          round(ram.percent, 1),
@@ -328,6 +504,18 @@ def get_stats():
         "temp":         temp,
         "thermal_pressure": thermal_pressure,
         "cpu_freq_ghz": cpu_freq,
+        "load_1":       round(load1, 2)  if load1  is not None else None,
+        "load_5":       round(load5, 2)  if load5  is not None else None,
+        "load_15":      round(load15, 2) if load15 is not None else None,
+        "cpu_cores":    cpu_cores,
+        "net_total_up_gb":   net_total_up_gb,
+        "net_total_down_gb": net_total_down_gb,
+        "docker_running": docker_running,
+        "docker_total":   docker_total,
+        "volumes":      volumes,
+        "power_w":      power_w,
+        "energy_wh":    energy_wh,
+        "energy_since": energy_since,
     }
 
 
@@ -563,6 +751,7 @@ if __name__ == "__main__":
     print("[status] Running initial status check...")
     threading.Thread(target=refresh_statuses, daemon=True).start()
     threading.Thread(target=status_refresh_loop, daemon=True).start()
+    threading.Thread(target=energy_loop, daemon=True).start()
 
     try:
         server.serve_forever()

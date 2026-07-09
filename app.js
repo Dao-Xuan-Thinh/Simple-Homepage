@@ -166,6 +166,17 @@ function fmtDate(iso) {
   return iso.slice(0, 10); // YYYY-MM-DD
 }
 
+function fmtEpochDate(epochSeconds) {
+  if (!epochSeconds) return '—';
+  return new Date(epochSeconds * 1000)
+    .toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); // e.g. Jul 9
+}
+
+function fmtEnergy(wh) {
+  if (wh == null) return '—';
+  return wh < 1000 ? `${wh.toFixed(1)} Wh` : `${(wh / 1000).toFixed(2)} kWh`;
+}
+
 function renderDownloadCards(repos) {
   const grid = document.getElementById('downloads-grid');
   if (!grid) return;
@@ -353,7 +364,11 @@ function renderStats(d) {
           swap, swap_used_gb,
           disk, disk_used_gb, disk_total_gb,
           disk_read_mbs, disk_write_mbs,
-          uptime, net_tx, net_rx, temp, thermal_pressure, cpu_freq_ghz } = d;
+          uptime, net_tx, net_rx, temp, thermal_pressure, cpu_freq_ghz,
+          load_1, load_5, load_15, cpu_cores,
+          net_total_up_gb, net_total_down_gb,
+          docker_running, docker_total, volumes,
+          power_w, energy_wh, energy_since } = d;
 
   const upEl = document.getElementById('stat-uptime');
   if (upEl) { upEl._baseUptime = uptime; uptimeOffset = 0; }
@@ -393,6 +408,44 @@ function renderStats(d) {
   const cpuFreq = document.getElementById('stat-cpu-freq');
   if (cpuFreq) cpuFreq.textContent = cpu_freq_ghz != null ? `${cpu_freq_ghz} GHz` : '';
 
+  // Power / cumulative energy (estimated wall draw)
+  const powerEl = document.getElementById('stat-power');
+  if (powerEl) powerEl.textContent = power_w != null ? `${power_w} W` : 'N/A';
+  const powerSub = document.getElementById('stat-power-sub');
+  if (powerSub) {
+    powerSub.textContent = energy_wh != null
+      ? `${fmtEnergy(energy_wh)} since ${fmtEpochDate(energy_since)} · est.`
+      : 'est. wall draw';
+  }
+
+  // Load average
+  const loadEl = document.getElementById('stat-load');
+  if (loadEl) {
+    loadEl.textContent = load_1 != null ? load_1.toFixed(2) : 'N/A';
+    // Flag sustained load above the core count
+    loadEl.style.color = (load_1 != null && cpu_cores && load_1 > cpu_cores) ? 'var(--warning)' : '';
+  }
+  const loadSub = document.getElementById('stat-load-sub');
+  if (loadSub && load_5 != null) {
+    loadSub.textContent = `5m ${load_5.toFixed(2)} · 15m ${load_15.toFixed(2)}` +
+      (cpu_cores ? ` · ${cpu_cores} cores` : '');
+  }
+
+  // Cumulative network total since boot
+  const netTotal = document.getElementById('stat-nettotal');
+  if (netTotal) netTotal.textContent = net_total_up_gb != null
+    ? `↑${net_total_up_gb} ↓${net_total_down_gb} GB`
+    : 'N/A';
+
+  // Docker container counts
+  const dockerEl = document.getElementById('stat-docker');
+  if (dockerEl) dockerEl.textContent = docker_running != null
+    ? `${docker_running} / ${docker_total}`
+    : 'N/A';
+
+  // Per-volume disk breakdown (internal + external drives)
+  renderVolumes(volumes);
+
   // Reset text color (in case we were in error state)
   ['stat-cpu','stat-ram','stat-swap','stat-disk','stat-temp','stat-net','stat-uptime','stat-diskio'].forEach(id => {
     const el = document.getElementById(id);
@@ -405,12 +458,35 @@ function renderStats(d) {
   setBar('bar-disk', disk);
 }
 
+function renderVolumes(volumes) {
+  const list = document.getElementById('volumes-list');
+  if (!list) return;
+  if (!Array.isArray(volumes) || !volumes.length) {
+    list.innerHTML = '<div class="stat-sub">N/A</div>';
+    return;
+  }
+  list.innerHTML = volumes.map(v => {
+    const pct = v.percent ?? 0;
+    const cls = pct >= 90 ? ' critical' : pct >= 75 ? ' hot' : '';
+    const tag = v.internal ? '' : '<span class="vol-tag">ext</span>';
+    return `<div class="vol-row">
+      <div class="vol-head">
+        <span class="vol-name">${escapeHtml(v.name)}${tag}</span>
+        <span class="vol-figs">${v.used_gb} / ${v.total_gb} GB · ${pct}%</span>
+      </div>
+      <div class="stat-bar-wrap"><div class="stat-bar${cls}" style="width:${Math.min(pct, 100)}%"></div></div>
+    </div>`;
+  }).join('');
+}
+
 function renderStatsError() {
-  ['stat-cpu','stat-ram','stat-swap','stat-disk','stat-temp','stat-net','stat-uptime','stat-diskio'].forEach(id => {
+  ['stat-cpu','stat-ram','stat-swap','stat-disk','stat-temp','stat-net','stat-uptime','stat-diskio',
+   'stat-power','stat-load','stat-nettotal','stat-docker'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.textContent = '—'; el.style.color = 'var(--offline)'; }
   });
-  ['stat-ram-detail','stat-swap-detail','stat-disk-detail','stat-cpu-freq'].forEach(id => {
+  ['stat-ram-detail','stat-swap-detail','stat-disk-detail','stat-cpu-freq',
+   'stat-power-sub','stat-load-sub'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = '';
   });
@@ -418,6 +494,8 @@ function renderStatsError() {
     const bar = document.getElementById(id);
     if (bar) bar.style.width = '0%';
   });
+  const volList = document.getElementById('volumes-list');
+  if (volList) volList.innerHTML = '<div class="stat-sub">—</div>';
   setBadgeError('badge-mac');
 }
 
