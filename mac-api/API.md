@@ -115,8 +115,9 @@ Fetch current system statistics from the Mac Mini.
   "uptime": 345600,
   "net_tx": 512,
   "net_rx": 256,
-  "temp": null,
-  "thermal_pressure": "Moderate",
+  "temp": 43.2,
+  "gpu_temp": 37.6,
+  "thermal_pressure": null,
   "cpu_freq_ghz": 3.2,
   "load_1": 2.75,
   "load_5": 3.46,
@@ -155,25 +156,27 @@ Fetch current system statistics from the Mac Mini.
 | `uptime` | int | System uptime in seconds |
 | `net_tx` | int | Network transmit rate in KB/s |
 | `net_rx` | int | Network receive rate in KB/s |
-| `temp` | float or null | CPU temperature in °C (Intel only; null on Apple Silicon) |
-| `thermal_pressure` | string | Thermal status: "Nominal", "Moderate", "Heavy", or "Sleeping" (Apple Silicon) |
+| `temp` | float or null | Live CPU temperature in °C (via macmon on Apple Silicon; `null` if macmon unavailable) |
+| `gpu_temp` | float or null | Live GPU temperature in °C (via macmon; `null` if unavailable) |
+| `thermal_pressure` | string or null | Fallback thermal level ("Nominal"/"Moderate"/"Heavy"/"Sleeping") when macmon can't provide a real temp; `null` on the macmon path |
 | `cpu_freq_ghz` | float | Current CPU frequency in GHz |
 | `load_1` / `load_5` / `load_15` | float or null | Load average over 1 / 5 / 15 minutes |
 | `cpu_cores` | int | Logical CPU core count (context for load average) |
 | `net_total_up_gb` / `net_total_down_gb` | float | Cumulative network sent / received in GB since boot |
 | `docker_running` / `docker_total` | int or null | Running / total Docker containers (`null` if Docker is down) |
 | `volumes` | array | Per-volume disk usage: `{name, mount, used_gb, total_gb, percent, internal}`. Internal data volume + external drives under `/Volumes`; system/recovery volumes filtered out |
-| `power_w` | float | Estimated wall power draw in watts (idle base + measured SoC power) |
+| `power_w` | float | Measured system power in watts (macmon `sys_power`) |
 | `energy_wh` | float | Cumulative energy in watt-hours since `energy_since`, persisted across restarts |
 | `energy_since` | int | Unix epoch when energy tracking began |
 
 **Notes:**
-- Apple Silicon M4 (like Mac mini M4) does NOT expose CPU die temperature via any macOS API
-- `temp` will be `null` on Apple Silicon; use `thermal_pressure` as a substitute
+- Live temperature comes from [macmon](https://github.com/vladkens/macmon) (`brew install macmon`), which reads Apple Silicon sensors via the private IOReport API — no sudo. `powermetrics`/psutil cannot read the M4 die temperature.
+- Without macmon the server degrades gracefully: `temp`/`gpu_temp` may be `null`, `thermal_pressure` carries the level, memory comes from psutil, and energy falls back to a flat `IDLE_BASE_W`.
+- Memory (`ram`, `ram_used_gb`) also comes from macmon (Activity-Monitor-accurate); the percentage and GB are always derived from the same figure so they agree.
 - `swap_used_gb` may be 0 on systems with minimal swap
 - All KB/s values are instantaneous (not averages)
 - `disk` reads the data volume, not `/` (the sealed read-only system snapshot, which misreports as ~26%)
-- `power_w` / `energy_wh` are **estimates**: `powermetrics` only measures chip (SoC) power, so a fixed idle base (`IDLE_BASE_W` in `server.py`, default 6.0 W) is added to approximate true wall draw. Not a metered reading.
+- `power_w` / `energy_wh` come from macmon's measured `sys_power` (SoC/system power from the PMU). More realistic than the old estimate, but still not a PSU wall-plug reading.
 
 **Refresh Rate**: Call every 5–10 seconds for smooth updates
 

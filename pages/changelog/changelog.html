@@ -68,8 +68,24 @@
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <div class="entry">
       <div class="entry-header">
-        <span class="entry-title">Batch 4 — Disk fix, power/energy &amp; more stats</span>
+        <span class="entry-title">Batch 5 — Live temperature &amp; memory fix (macmon)</span>
         <span class="badge badge-latest">Latest</span>
+        <span class="entry-date">2026-07-13</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-feat">feat</span>Live CPU/GPU temperature via <a href="https://github.com/vladkens/macmon">macmon</a> — reads Apple Silicon sensors through the private IOReport API with <strong>no sudo</strong>, so the M4 finally shows a real °C instead of just a pressure level</li>
+        <li><span class="tag tag-fix">fix</span>Memory stat was internally inconsistent (bar used one psutil formula, the GB text another) — now sourced from macmon so the % and the GB always agree and match Activity Monitor</li>
+        <li><span class="tag tag-feat">feat</span>Power/Energy now uses macmon's <strong>measured</strong> <code>sys_power</code> instead of the idle-base estimate — and no longer needs the <code>sudo powermetrics</code> rule</li>
+        <li><span class="tag tag-api">api</span><code>/api/stats</code> adds <code>gpu_temp</code>; <code>temp</code> is now populated on Apple Silicon and <code>thermal_pressure</code> is <code>null</code> on the macmon path</li>
+        <li><span class="tag tag-ui">ui</span>Thermal card shows GPU temp beside the CPU reading; Power card drops the "est." qualifier now that the figure is measured</li>
+        <li><span class="tag tag-fix">fix</span>Graceful fallback when macmon is absent — thermal-pressure level, psutil memory (made consistent), and a flat energy base</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Batch 4 — Disk fix, power/energy &amp; more stats</span>
         <span class="entry-date">2026-07-09</span>
       </div>
       <ul class="changes">

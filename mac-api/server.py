@@ -28,6 +28,7 @@ import subprocess
 import threading
 import time
 import os
+import shutil
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -81,15 +82,16 @@ _config_lock  = threading.Lock()
 _status_cache = {"services": [], "projects": [], "ts": 0}
 _status_lock  = threading.Lock()
 
+# macmon (https://github.com/vladkens/macmon) reads Apple Silicon sensors via the
+# private IOReport API - no sudo. We use it for live CPU/GPU temperature, a memory
+# figure that matches Activity Monitor, and real measured system power.
+MACMON_BIN = shutil.which("macmon") or "/opt/homebrew/bin/macmon"
+
 # ── Energy tracking ───────────────────────────────────────────────────────────
-# The Mac mini has no battery, so we can't read true wall draw. powermetrics only
-# reports SoC (CPU+GPU+ANE) power, which is chip-only (~0.1 W idle). We estimate
-# wall draw as IDLE_BASE_W + measured SoC power and integrate it into a running
-# kWh total that persists across restarts in energy.json.
-#
-# IDLE_BASE_W is the assumed fixed overhead (PSU, DRAM, SSD, I/O, fans) that
-# powermetrics doesn't see. ~6 W is a reasonable Mac mini M4 idle figure; tune it
-# against a smart-plug reading if you ever measure the real wall draw.
+# Integrate measured system power (macmon sys_power) into a running kWh total that
+# persists across restarts in energy.json. sys_power is the SoC/system power from
+# the PMU - more realistic than compute-only power, though still not a PSU wall
+# reading. IDLE_BASE_W is only a last-resort fallback if macmon is unavailable.
 IDLE_BASE_W     = 6.0
 ENERGY_INTERVAL = 60  # seconds between power samples
 ENERGY_FILE     = os.path.join(os.path.dirname(CONFIG_FILE), "energy.json")
@@ -153,41 +155,60 @@ def save_energy(last_update):
         print(f"[energy] Failed to save {ENERGY_FILE}: {exc}")
 
 
-def get_soc_power_w():
+def get_macmon(interval_ms=200, samples=1):
     """
-    Sample SoC power (CPU+GPU+ANE) via powermetrics. Returns watts, or None on failure.
-    This is chip-only power, not wall draw - see IDLE_BASE_W.
+    Sample Apple Silicon sensors via macmon (IOReport - no sudo). Returns a
+    normalized dict, or None on failure (not installed, timeout, bad JSON).
+    A short interval is fine for point-in-time temp/memory; use ~1000 ms when the
+    power reading matters (it needs a sampling window).
     """
     try:
         result = subprocess.run(
-            ["sudo", "-n", "powermetrics", "--samplers", "cpu_power", "-n", "1", "-i", "1000"],
-            capture_output=True, text=True, timeout=10,
+            [MACMON_BIN, "pipe", "-s", str(samples), "-i", str(interval_ms)],
+            capture_output=True, text=True, timeout=8,
         )
-        m = re.search(r"Combined Power \(CPU \+ GPU \+ ANE\):\s*([\d.]+)\s*mW", result.stdout)
-        if m:
-            return float(m.group(1)) / 1000.0
+        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        if not lines:
+            return None
+        d = json.loads(lines[-1])
+        temp = d.get("temp", {}) or {}
+        mem  = d.get("memory", {}) or {}
+        return {
+            "cpu_temp":   temp.get("cpu_temp_avg"),
+            "gpu_temp":   temp.get("gpu_temp_avg"),
+            "ram_used":   mem.get("ram_usage"),
+            "ram_total":  mem.get("ram_total"),
+            "swap_used":  mem.get("swap_usage"),
+            "swap_total": mem.get("swap_total"),
+            "sys_power":  d.get("sys_power"),
+            "all_power":  d.get("all_power"),
+        }
     except Exception:
-        pass
-    return None
+        return None
 
 
 def energy_loop():
     """
-    Background thread: every ENERGY_INTERVAL seconds, sample power and integrate
-    it into the persisted kWh total. Estimated wall draw = IDLE_BASE_W + SoC power.
-    Downtime is not counted - dt is capped so sleep/off gaps don't spike the total.
+    Background thread: every ENERGY_INTERVAL seconds, sample measured system power
+    (macmon sys_power) and integrate it into the persisted kWh total. Downtime is
+    not counted - dt is capped so sleep/off gaps don't spike the total.
     """
     load_energy()
     last_update = time.time()
     while True:
         time.sleep(ENERGY_INTERVAL)
-        soc_w = get_soc_power_w()
+        mac = get_macmon(interval_ms=1000)  # 1 s window for an accurate power read
         now = time.time()
         dt = min(now - last_update, 5 * ENERGY_INTERVAL)  # cap gaps (sleep/downtime)
-        wall_w = IDLE_BASE_W + (soc_w if soc_w is not None else 0.0)
+        if mac and mac.get("sys_power") is not None:
+            watts = mac["sys_power"]
+        elif mac and mac.get("all_power") is not None:
+            watts = mac["all_power"]
+        else:
+            watts = IDLE_BASE_W  # last-resort fallback if macmon is unavailable
         with _energy_lock:
-            _energy["total_wh"] += wall_w * (dt / 3600.0)
-            _energy["power_w"]   = round(wall_w, 2)
+            _energy["total_wh"] += watts * (dt / 3600.0)
+            _energy["power_w"]   = round(watts, 2)
         save_energy(now)
         last_update = now
 
@@ -419,6 +440,29 @@ def get_stats():
     cpu = psutil.cpu_percent(interval=0.5)
     ram = psutil.virtual_memory()
     swap = psutil.swap_memory()
+
+    # One macmon sample (no sudo), reused below for temp, memory, and current power.
+    mac = get_macmon()
+
+    # Memory: prefer macmon (matches Activity Monitor); else psutil with a single
+    # consistent formula (used = total - available) so the % and the GB agree.
+    GB = 1024**3
+    if mac and mac.get("ram_used") and mac.get("ram_total"):
+        ram_total_gb = round(mac["ram_total"] / GB, 2)
+        ram_used_gb  = round(mac["ram_used"]  / GB, 2)
+        ram_pct      = round(mac["ram_used"] / mac["ram_total"] * 100, 1)
+        swap_total_b = mac.get("swap_total") or 0
+        swap_used_b  = mac.get("swap_used") or 0
+        swap_used_gb = round(swap_used_b / GB, 2)
+        swap_pct     = round(swap_used_b / swap_total_b * 100, 1) if swap_total_b else 0.0
+    else:
+        ram_used_b   = ram.total - ram.available
+        ram_total_gb = round(ram.total / GB, 2)
+        ram_used_gb  = round(ram_used_b / GB, 2)
+        ram_pct      = round(ram_used_b / ram.total * 100, 1)
+        swap_used_gb = round(swap.used / GB, 2)
+        swap_pct     = round(swap.percent, 1)
+
     # On macOS, "/" is the sealed read-only system snapshot (~26% used); the real
     # user data lives on the Data volume. Fall back to "/" on Intel / non-APFS.
     try:
@@ -448,20 +492,27 @@ def get_stats():
     except Exception:
         pass
 
-    # Temperature - try osx-cpu-temp / powermetrics (Intel), fall back to psutil
-    temp = get_cpu_temp()
-    if temp is None:
-        try:
-            temps = psutil.sensors_temperatures()
-            if temps:
-                all_temps = [t.current for group in temps.values() for t in group]
-                if all_temps:
-                    temp = round(sum(all_temps) / len(all_temps), 1)
-        except (AttributeError, NotImplementedError):
-            pass
-
-    # Thermal pressure - always works on Apple Silicon M4 even when temp is None
-    thermal_pressure = get_thermal_pressure()
+    # Temperature - macmon gives real CPU/GPU temp on Apple Silicon (no sudo).
+    # Only if macmon is unavailable, fall back to osx-cpu-temp / powermetrics /
+    # psutil for temp plus the thermal-pressure level.
+    gpu_temp = None
+    if mac and mac.get("cpu_temp") is not None:
+        temp = round(mac["cpu_temp"], 1)
+        gpu_temp = round(mac["gpu_temp"], 1) if mac.get("gpu_temp") is not None else None
+        thermal_pressure = None
+    else:
+        temp = get_cpu_temp()
+        if temp is None:
+            try:
+                temps = psutil.sensors_temperatures()
+                if temps:
+                    all_temps = [t.current for group in temps.values() for t in group]
+                    if all_temps:
+                        temp = round(sum(all_temps) / len(all_temps), 1)
+            except (AttributeError, NotImplementedError):
+                pass
+        # Thermal pressure - works on Apple Silicon M4 even when temp is None
+        thermal_pressure = get_thermal_pressure()
 
     # Load average + core count
     try:
@@ -480,19 +531,22 @@ def get_stats():
     # Per-volume disk breakdown (internal + external drives)
     volumes = get_disk_volumes()
 
-    # Energy snapshot (accumulated by energy_loop)
+    # Energy snapshot (accumulated by energy_loop); prefer the fresh macmon
+    # sys_power reading for the displayed current power when available.
     with _energy_lock:
         power_w      = _energy["power_w"]
         energy_wh    = round(_energy["total_wh"], 1)
         energy_since = _energy["since"]
+    if mac and mac.get("sys_power") is not None:
+        power_w = round(mac["sys_power"], 2)
 
     return {
         "cpu":          round(cpu, 1),
-        "ram":          round(ram.percent, 1),
-        "ram_used_gb":  round(ram.used   / 1024**3, 2),
-        "ram_total_gb": round(ram.total  / 1024**3, 2),
-        "swap":         round(swap.percent, 1),
-        "swap_used_gb": round(swap.used  / 1024**3, 2),
+        "ram":          ram_pct,
+        "ram_used_gb":  ram_used_gb,
+        "ram_total_gb": ram_total_gb,
+        "swap":         swap_pct,
+        "swap_used_gb": swap_used_gb,
         "disk":         round(disk.percent, 1),
         "disk_used_gb": round(disk.used  / 1024**3, 1),
         "disk_total_gb":round(disk.total / 1024**3, 1),
@@ -502,6 +556,7 @@ def get_stats():
         "net_tx":       net_tx,
         "net_rx":       net_rx,
         "temp":         temp,
+        "gpu_temp":     gpu_temp,
         "thermal_pressure": thermal_pressure,
         "cpu_freq_ghz": cpu_freq,
         "load_1":       round(load1, 2)  if load1  is not None else None,

@@ -26,16 +26,17 @@ A personal dashboard hosted on GitHub Pages that provides centralized access to 
 - Real-time CPU, RAM, Disk, Swap, and Network stats from your Mac mini
 - Disk usage reads the real data volume (`/System/Volumes/Data`), not the sealed macOS system snapshot
 - **Storage Volumes**: per-volume breakdown (internal drive + any external drives under `/Volumes`), each with a usage bar; APFS system plumbing is filtered out
-- **Power / Energy**: estimated wall draw plus a cumulative kWh total that persists across restarts (see below)
+- **Live CPU / GPU temperature** via [macmon](https://github.com/vladkens/macmon) — reads Apple Silicon sensors through the private IOReport API (no sudo), so the M4 finally reports a real °C
+- **Power / Energy**: real measured system power plus a cumulative kWh total that persists across restarts (see below)
+- **Memory** figure matches Activity Monitor (from macmon), with the % and GB always consistent
 - **Load average** (1/5/15-min + core count), **Network total** (GB since boot), and **Docker** (running / total containers) cards
-- Thermal pressure level (Nominal / Moderate / Heavy) — since Apple Silicon M4 doesn't expose CPU temperature
 - Service uptime and performance metrics
 - Individual service health checks via TCP port or HTTP URL
 
-#### Power / energy tracking
-The Mac mini has no battery, so there's no true wall-draw sensor. `powermetrics` only reports **SoC power** (CPU+GPU+ANE), which is chip-only (~0.1 W idle). The server estimates wall draw as **`IDLE_BASE_W` + measured SoC power** and integrates it into a running Wh total, sampled every 60 s by a background thread and persisted in `energy.json` (git-ignored) so it survives restarts. Downtime isn't counted — the gap is capped so sleep/off periods don't spike the total.
+#### Temperature & power (macmon)
+Apple Silicon M4 exposes no CPU die temperature via `powermetrics` or psutil. [`macmon`](https://github.com/vladkens/macmon) reads the SoC sensors through the private IOReport API — **without sudo** — so the server shells out to `macmon pipe` for live CPU/GPU temperature, an Activity-Monitor-accurate memory figure, and real measured system power. The Power/Energy card integrates macmon's `sys_power` into a running Wh total, sampled every 60 s and persisted in `energy.json` (git-ignored) so it survives restarts. Downtime isn't counted — the gap is capped so sleep/off periods don't spike the total.
 
-> The energy figure is an **estimate**, not a metered reading. `IDLE_BASE_W` (default `6.0`, near the top of `server.py`) is the assumed fixed overhead (PSU, DRAM, SSD, I/O, fans) that `powermetrics` can't see. Tune it against a smart-plug reading if you ever measure the real wall draw.
+> `sys_power` is the SoC/system power reported by the PMU — measured, and far more realistic than the old estimate, but still **not** a PSU wall-plug reading (it excludes SSD, USB, fans, and PSU losses). If macmon is missing, the server degrades gracefully: thermal-pressure level instead of °C, psutil memory, and a flat `IDLE_BASE_W` fallback for energy.
 
 ### 📋 Multi-Container Log Viewer
 - View logs from any Docker container in real-time
@@ -105,6 +106,7 @@ untick to forget it immediately).
 - **Mac mini** running macOS with Docker installed
 - **Tailscale** installed (for remote access)
 - **Python 3.7+** with `psutil` and `docker` packages
+- **[macmon](https://github.com/vladkens/macmon)** (`brew install macmon`) — for live CPU/GPU temperature, accurate memory, and measured power on Apple Silicon (no sudo). Optional; the server falls back gracefully without it.
 - **Git** (optional, for cloning this repo)
 
 ### 1. Set Up Mac Mini API Server
@@ -112,6 +114,7 @@ untick to forget it immediately).
 #### Install Dependencies
 ```bash
 pip install psutil docker
+brew install macmon   # live temperature / memory / power (Apple Silicon, no sudo)
 ```
 
 #### Download and Run Server
@@ -123,7 +126,7 @@ cd ~/Projects
 curl -o server.py https://raw.githubusercontent.com/Dao-Xuan-Thinh/Simple-Homepage/main/mac-api/server.py
 curl -o config.json https://raw.githubusercontent.com/Dao-Xuan-Thinh/Simple-Homepage/main/mac-api/config.json
 
-# Create sudoers rule for powermetrics (thermal pressure monitoring)
+# Optional: sudoers rule for the powermetrics fallback (only used if macmon is absent)
 sudo sh -c 'echo "YOUR_USERNAME ALL=(ALL) NOPASSWD: /usr/bin/powermetrics" > /etc/sudoers.d/powermetrics'
 
 # Start the server (runs on port 9000)
@@ -271,8 +274,9 @@ System statistics from the Mac mini.
   "uptime": 345600,
   "net_tx": 512,
   "net_rx": 256,
-  "temp": null,
-  "thermal_pressure": "Moderate",
+  "temp": 43.2,
+  "gpu_temp": 37.6,
+  "thermal_pressure": null,
   "cpu_freq_ghz": 3.2,
   "load_1": 2.75,
   "load_5": 3.46,
@@ -286,13 +290,13 @@ System statistics from the Mac mini.
     { "name": "Macintosh HD", "mount": "/System/Volumes/Data", "used_gb": 168.0, "total_gb": 228.3, "percent": 83.0, "internal": true },
     { "name": "Backup", "mount": "/Volumes/Backup", "used_gb": 245.2, "total_gb": 952.2, "percent": 25.8, "internal": false }
   ],
-  "power_w": 6.13,
-  "energy_wh": 142.6,
+  "power_w": 8.74,
+  "energy_wh": 578.9,
   "energy_since": 1783603292
 }
 ```
 
-`power_w` is estimated wall draw (idle base + SoC); `energy_wh` is the cumulative total since `energy_since` (epoch). `docker_*` are `null` when Docker isn't running. `volumes` lists the internal data volume plus external drives mounted under `/Volumes` (system/recovery volumes are filtered out).
+`temp` / `gpu_temp` are live °C from macmon (Apple Silicon); when macmon is unavailable, `temp` may be `null` and `thermal_pressure` carries the Nominal/Moderate/Heavy level instead. `power_w` is macmon's measured `sys_power`; `energy_wh` is the cumulative total since `energy_since` (epoch). `docker_*` are `null` when Docker isn't running. `volumes` lists the internal data volume plus external drives mounted under `/Volumes` (system/recovery volumes are filtered out).
 
 ---
 
@@ -497,5 +501,5 @@ MIT — Feel free to fork, modify, and use for personal projects.
 
 ---
 
-**Last Updated**: 2026-07-09  
-**Current Version**: Batch 4 (disk-volume fix + power/energy tracking + load/network/Docker stats)
+**Last Updated**: 2026-07-13  
+**Current Version**: Batch 5 (live CPU/GPU temperature + memory fix + measured power via macmon)

@@ -363,7 +363,7 @@ function renderStats(d) {
   const { cpu, ram, ram_used_gb, ram_total_gb,
           swap, swap_used_gb,
           disk_read_mbs, disk_write_mbs,
-          uptime, net_tx, net_rx, temp, thermal_pressure, cpu_freq_ghz,
+          uptime, net_tx, net_rx, temp, gpu_temp, thermal_pressure, cpu_freq_ghz,
           load_1, load_5, load_15, cpu_cores,
           net_total_up_gb, net_total_down_gb,
           docker_running, docker_total, volumes,
@@ -376,15 +376,23 @@ function renderStats(d) {
   document.getElementById('stat-ram').textContent  = ram + '%';
   document.getElementById('stat-swap').textContent = swap != null ? swap + '%' : 'N/A';
   const tempEl = document.getElementById('stat-temp');
+  const tempSub = document.getElementById('stat-temp-sub');
   if (temp != null) {
     tempEl.textContent = temp + '°C';
     tempEl.style.color = '';
+    // Sub-line: GPU temp (macmon) and/or pressure level when available
+    const bits = [];
+    if (gpu_temp != null) bits.push(`GPU ${gpu_temp}°C`);
+    if (thermal_pressure) bits.push(thermal_pressure);
+    if (tempSub) tempSub.textContent = bits.length ? bits.join(' · ') : 'CPU temperature';
   } else if (thermal_pressure) {
     const pressureColors = { Nominal: '', Moderate: 'var(--warning)', Heavy: 'var(--offline)', Sleeping: '' };
     tempEl.textContent = thermal_pressure;
     tempEl.style.color = pressureColors[thermal_pressure] ?? '';
+    if (tempSub) tempSub.textContent = 'pressure level';
   } else {
     tempEl.textContent = 'N/A';
+    if (tempSub) tempSub.textContent = '';
   }
   document.getElementById('stat-net').textContent  = `↑${net_tx} ↓${net_rx} KB/s`;
   document.getElementById('stat-uptime').textContent = fmtUptime(uptime);
@@ -409,8 +417,8 @@ function renderStats(d) {
   const powerSub = document.getElementById('stat-power-sub');
   if (powerSub) {
     powerSub.textContent = energy_wh != null
-      ? `${fmtEnergy(energy_wh)} since ${fmtEpochDate(energy_since)} · est.`
-      : 'est. wall draw';
+      ? `${fmtEnergy(energy_wh)} since ${fmtEpochDate(energy_since)}`
+      : 'system power';
   }
 
   // Load average
@@ -480,7 +488,7 @@ function renderStatsError() {
     if (el) { el.textContent = '—'; el.style.color = 'var(--offline)'; }
   });
   ['stat-ram-detail','stat-swap-detail','stat-cpu-freq',
-   'stat-power-sub','stat-load-sub'].forEach(id => {
+   'stat-power-sub','stat-load-sub','stat-temp-sub'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = '';
   });
