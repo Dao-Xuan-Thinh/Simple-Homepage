@@ -85,7 +85,8 @@ _status_lock  = threading.Lock()
 # macmon (https://github.com/vladkens/macmon) reads Apple Silicon sensors via the
 # private IOReport API - no sudo. We use it for live CPU/GPU temperature, a memory
 # figure that matches Activity Monitor, and real measured system power.
-MACMON_BIN = shutil.which("macmon") or "/opt/homebrew/bin/macmon"
+MACMON_BIN    = shutil.which("macmon") or "/opt/homebrew/bin/macmon"
+TAILSCALE_BIN = shutil.which("tailscale") or "/usr/local/bin/tailscale"
 
 # ── Energy tracking ───────────────────────────────────────────────────────────
 # Integrate measured system power (macmon sys_power) into a running kWh total that
@@ -385,6 +386,108 @@ def get_docker_counts():
         return _count(["ps", "-q"]), _count(["ps", "-aq"])
     except Exception:
         return None, None
+
+
+# ── Tailscale + Docker stats (subprocess-heavy → short TTL cache) ────────────────
+
+_ttl_cache = {}          # name -> {"data": ..., "ts": float}
+_ttl_lock  = threading.Lock()
+
+def _cached(name, ttl, producer):
+    """Return producer()'s result, memoized for `ttl` seconds (per name)."""
+    now = time.time()
+    with _ttl_lock:
+        entry = _ttl_cache.get(name)
+        if entry and now - entry["ts"] < ttl:
+            return entry["data"]
+    data = producer()
+    with _ttl_lock:
+        _ttl_cache[name] = {"data": data, "ts": now}
+    return data
+
+
+def _get_tailscale_uncached():
+    """Parse `tailscale status --json` into a list of real devices (funnel nodes filtered)."""
+    try:
+        result = subprocess.run(
+            [TAILSCALE_BIN, "status", "--json"],
+            capture_output=True, text=True, timeout=6,
+        )
+        data = json.loads(result.stdout)
+    except Exception:
+        return None
+
+    def entry(node, is_self):
+        ips = node.get("TailscaleIPs") or []
+        # Prefer the 100.x IPv4 address for display
+        ip = next((a for a in ips if a.startswith("100.")), (ips[0] if ips else None))
+        return {
+            "name":      node.get("HostName") or node.get("DNSName", "").split(".")[0] or "?",
+            "os":        node.get("OS", ""),
+            "online":    bool(node.get("Online")),
+            "ip":        ip,
+            "last_seen": node.get("LastSeen"),
+            "is_self":   is_self,
+        }
+
+    devices = []
+    self_node = data.get("Self")
+    if self_node and self_node.get("OS"):
+        devices.append(entry(self_node, True))
+    for node in (data.get("Peer") or {}).values():
+        # Real devices report an OS; funnel-ingress-node peers do not.
+        if node.get("OS"):
+            devices.append(entry(node, False))
+
+    # self first, then online before offline, then by name
+    devices.sort(key=lambda d: (not d["is_self"], not d["online"], d["name"].lower()))
+    return devices
+
+
+def get_tailscale():
+    return _cached("tailscale", 15, _get_tailscale_uncached)
+
+
+def _get_docker_stats_uncached():
+    """Per-container CPU/MEM via `docker stats --no-stream`. None if Docker is unavailable."""
+    try:
+        result = subprocess.run(
+            ["docker", "stats", "--no-stream", "--format", "{{json .}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+    except Exception:
+        return None
+
+    containers = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            c = json.loads(line)
+        except ValueError:
+            continue
+
+        def pct(v):
+            try:
+                return round(float(str(v).replace("%", "").strip()), 1)
+            except ValueError:
+                return None
+
+        containers.append({
+            "name":    c.get("Name", "?"),
+            "cpu_pct": pct(c.get("CPUPerc")),
+            "mem_pct": pct(c.get("MemPerc")),
+            "mem":     c.get("MemUsage", ""),
+        })
+    containers.sort(key=lambda x: (x["cpu_pct"] is None, -(x["cpu_pct"] or 0)))
+    return containers
+
+
+def get_docker_stats():
+    return _cached("docker_stats", 12, _get_docker_stats_uncached)
 
 
 # Internal APFS plumbing / recovery to hide from the per-volume breakdown.
@@ -733,6 +836,18 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/config":
             config = load_config()
             json_response(self, config)
+
+        elif path == "/api/tailscale":
+            try:
+                json_response(self, {"devices": get_tailscale() or [], "ts": int(time.time())})
+            except Exception as e:
+                json_response(self, {"error": str(e)}, 500)
+
+        elif path == "/api/docker":
+            try:
+                json_response(self, {"containers": get_docker_stats() or [], "ts": int(time.time())})
+            except Exception as e:
+                json_response(self, {"error": str(e)}, 500)
 
         elif path == "/api/logs":
             service = qs.get("service", ["immich"])[0]

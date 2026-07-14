@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Dashboard">
+  <rect width="512" height="512" rx="112" fill="#0d0d14"/>
+  <rect x="34" y="34" width="444" height="444" rx="92" fill="none" stroke="#6b9af2" stroke-width="10" opacity="0.35"/>
+  <path d="M256 108 L400 232 V400 H112 V232 Z" fill="none" stroke="#6b9af2" stroke-width="30" stroke-linejoin="round"/>
+  <rect x="214" y="300" width="84" height="100" rx="6" fill="#6b9af2"/>
+</svg>

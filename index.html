@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>My Dashboard</title>
+  <meta name="description" content="Personal homelab dashboard — live Mac mini stats, services, and Tailscale devices" />
+  <meta name="theme-color" content="#0d0d14" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="dark">
@@ -14,6 +22,10 @@
       <div class="brand">
         <span class="brand-icon">⌂</span>
         <h1>My Dashboard</h1>
+      </div>
+      <div class="header-clock" id="header-clock">
+        <div class="clock-time" id="clock-time">--:--:--</div>
+        <div class="clock-greet" id="clock-greet">Hello</div>
       </div>
       <div class="header-actions">
         <button id="settings-btn" aria-label="Settings" title="Manage projects &amp; services">⚙️</button>
@@ -29,7 +41,7 @@
     <!-- ── Project Links ─────────────────────────────────────── -->
     <section class="section">
       <h2 class="section-title">
-        <span class="section-icon">🔗</span> Projects &amp; Services
+        <span class="section-icon">◈</span> Projects &amp; Services
       </h2>
       <!-- Populated dynamically by app.js from /api/config -->
       <div class="cards-grid" id="projects-grid">
@@ -40,34 +52,36 @@
     <!-- ── Mac Mini Status ───────────────────────────────────── -->
     <section class="section">
       <h2 class="section-title">
-        <span class="section-icon">🖥️</span> Mac Mini Status
+        <span class="section-icon">▤</span> Mac Mini Status
         <span class="badge badge-mock" id="badge-mac">Connecting…</span>
       </h2>
       <div class="cards-grid stats-grid">
 
         <!-- Processing -->
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="cpu">
           <div class="stat-label">CPU Usage</div>
           <div class="stat-value" id="stat-cpu">—</div>
           <div class="stat-bar-wrap"><div class="stat-bar" id="bar-cpu"></div></div>
           <div class="stat-sub" id="stat-cpu-freq"></div>
+          <span class="spark" id="spark-cpu"></span>
         </div>
 
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="load">
           <div class="stat-label">Load Average</div>
           <div class="stat-value" id="stat-load">—</div>
           <div class="stat-sub" id="stat-load-sub">1m · 5m · 15m</div>
         </div>
 
         <!-- Memory -->
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="ram">
           <div class="stat-label">RAM Usage</div>
           <div class="stat-value" id="stat-ram">—</div>
           <div class="stat-bar-wrap"><div class="stat-bar" id="bar-ram"></div></div>
           <div class="stat-sub" id="stat-ram-detail"></div>
+          <span class="spark" id="spark-ram"></span>
         </div>
 
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="swap">
           <div class="stat-label">Swap</div>
           <div class="stat-value" id="stat-swap">—</div>
           <div class="stat-bar-wrap"><div class="stat-bar" id="bar-swap"></div></div>
@@ -75,45 +89,47 @@
         </div>
 
         <!-- Thermal & power -->
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="temp">
           <div class="stat-label">Thermal</div>
           <div class="stat-value" id="stat-temp">—</div>
           <div class="stat-sub" id="stat-temp-sub">CPU temperature</div>
+          <span class="spark" id="spark-temp"></span>
         </div>
 
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="power">
           <div class="stat-label">Power</div>
           <div class="stat-value" id="stat-power">—</div>
           <div class="stat-sub" id="stat-power-sub">system power</div>
+          <span class="spark" id="spark-power"></span>
         </div>
 
         <!-- Throughput -->
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="disk">
           <div class="stat-label">Disk I/O</div>
           <div class="stat-value" id="stat-diskio">—</div>
           <div class="stat-sub">Read / Write per second</div>
         </div>
 
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="net">
           <div class="stat-label">Network</div>
           <div class="stat-value" id="stat-net">—</div>
           <div class="stat-sub">↑ Upload &nbsp;↓ Download (KB/s)</div>
         </div>
 
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="net">
           <div class="stat-label">Network Total</div>
           <div class="stat-value" id="stat-nettotal">—</div>
           <div class="stat-sub">↑ Sent ↓ Received (since boot)</div>
         </div>
 
         <!-- System -->
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="docker">
           <div class="stat-label">Docker</div>
           <div class="stat-value" id="stat-docker">—</div>
           <div class="stat-sub">running / total containers</div>
         </div>
 
-        <div class="card stat-card">
+        <div class="card stat-card" data-metric="uptime">
           <div class="stat-label">Uptime</div>
           <div class="stat-value uptime" id="stat-uptime">—</div>
           <div class="stat-sub">Mac mini M4 · macOS</div>
@@ -146,7 +162,7 @@
     <!-- ── Server Status ─────────────────────────────────────── -->
     <section class="section">
       <h2 class="section-title">
-        <span class="section-icon">📡</span> Server Status
+        <span class="section-icon">◉</span> Server Status
         <span class="badge badge-mock" id="badge-servers">Connecting…</span>
       </h2>
       <!-- Populated dynamically by app.js from /api/services -->
@@ -155,10 +171,34 @@
       </div>
     </section>
 
+    <!-- ── Tailscale Devices ─────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">
+        <span class="section-icon">⇄</span> Tailscale
+        <span class="badge badge-mock" id="badge-tailnet">Connecting…</span>
+      </h2>
+      <!-- Populated dynamically by app.js from /api/tailscale -->
+      <div class="cards-grid tailnet-grid" id="tailnet-grid">
+        <div class="card placeholder-card">Loading…</div>
+      </div>
+    </section>
+
+    <!-- ── Containers ────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">
+        <span class="section-icon">▣</span> Containers
+        <span class="badge badge-mock" id="badge-docker">Connecting…</span>
+      </h2>
+      <!-- Populated dynamically by app.js from /api/docker -->
+      <div class="cards-grid docker-grid" id="docker-grid">
+        <div class="card placeholder-card">Loading…</div>
+      </div>
+    </section>
+
     <!-- ── Log Viewer ────────────────────────────────────────── -->
     <section class="section">
       <h2 class="section-title">
-        <span class="section-icon">📋</span> Logs
+        <span class="section-icon">≡</span> Logs
         <span class="badge badge-mock" id="badge-logs">Connecting…</span>
       </h2>
       <div class="log-controls">
@@ -181,6 +221,19 @@
   <footer>
     <p>Hosted on <a href="https://pages.github.com" target="_blank" rel="noopener">GitHub Pages</a> · Connected via Tailscale</p>
   </footer>
+
+  <!-- ── Command Palette ───────────────────────────────────────── -->
+  <div class="cmdk-overlay" id="cmdk-overlay" hidden>
+    <div class="cmdk" role="dialog" aria-modal="true" aria-label="Command palette">
+      <input type="text" class="cmdk-input" id="cmdk-input" placeholder="Jump to a service, download, or device…" autocomplete="off" spellcheck="false" />
+      <div class="cmdk-list" id="cmdk-list"></div>
+      <div class="cmdk-hint">
+        <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+        <span><kbd>↵</kbd> open</span>
+        <span><kbd>esc</kbd> close</span>
+      </div>
+    </div>
+  </div>
 
   <!-- ── Settings Modal ────────────────────────────────────────── -->
   <div class="modal-overlay" id="modal-overlay" hidden>

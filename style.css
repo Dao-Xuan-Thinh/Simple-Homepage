@@ -1,34 +1,64 @@
 /* ── CSS Custom Properties ─────────────────────────────────────── */
 :root {
-  --bg: #f4f6fb;
-  --bg-alt: #eaecf3;
+  --bg: #eef1f8;
+  --bg-grad: radial-gradient(1200px 600px at 15% -5%, #ffffff 0%, #eef1f8 55%);
+  --bg-alt: #e6e9f2;
   --card-bg: #ffffff;
   --card-border: #e2e5ef;
   --text: #1a1d27;
   --text-muted: #6b7180;
   --accent: #5b8dee;
   --accent-hover: #3f70d6;
-  --online: #3dbb7a;
-  --warning: #f0a840;
+  --online: #22a565;
+  --warning: #e0952c;
   --offline: #e05555;
-  --bar-bg: #e2e5ef;
+  --bar-bg: #e6e9f2;
+  --mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, 'Consolas', monospace;
   --shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   --radius: 12px;
   --radius-sm: 8px;
   --transition: 0.25s ease;
+
+  /* Per-metric accent colors (validated: CVD-distinguishable, contrast-safe).
+     Each stat card carries data-metric to pick its stripe / value / bar color. */
+  --m-cpu:    #5b8dee;
+  --m-load:   #17a99a;
+  --m-ram:    #a259e6;
+  --m-swap:   #7b8398;
+  --m-temp:   #e0952c;
+  --m-power:  #22a565;
+  --m-disk:   #dd7433;
+  --m-net:    #1c9fca;
+  --m-docker: #5b8dee;
+  --m-uptime: #7b8398;
 }
 
 body.dark {
-  --bg: #0f0f17;
-  --bg-alt: #16161f;
-  --card-bg: #1a1a26;
-  --card-border: #2a2a3d;
-  --text: #e2e4f0;
+  --bg: #0d0d14;
+  --bg-grad: radial-gradient(1200px 700px at 12% -8%, #1a1b2b 0%, #0d0d14 55%);
+  --bg-alt: #15161f;
+  --card-bg: #16161f;
+  --card-border: #282a3a;
+  --text: #e6e8f2;
   --text-muted: #8b8fa8;
   --accent: #6b9af2;
   --accent-hover: #85aeff;
-  --bar-bg: #2a2a3d;
-  --shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+  --online: #3dbb7a;
+  --warning: #f0a840;
+  --offline: #f06868;
+  --bar-bg: #24263a;
+  --shadow: 0 2px 20px rgba(0, 0, 0, 0.45);
+
+  --m-cpu:    #6b9af2;
+  --m-load:   #5ad1c0;
+  --m-ram:    #b98cf5;
+  --m-swap:   #8a93a8;
+  --m-temp:   #f0a840;
+  --m-power:  #3dbb7a;
+  --m-disk:   #e8894f;
+  --m-net:    #4fc3e8;
+  --m-docker: #7aa2f7;
+  --m-uptime: #8a93a8;
 }
 
 /* ── Reset & Base ──────────────────────────────────────────────── */
@@ -39,6 +69,8 @@ html { scroll-behavior: smooth; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg);
+  background-image: var(--bg-grad);
+  background-attachment: fixed;
   color: var(--text);
   min-height: 100vh;
   transition: background var(--transition), color var(--transition);
@@ -52,10 +84,41 @@ header {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: var(--card-bg);
+  background: color-mix(in srgb, var(--card-bg) 82%, transparent);
   border-bottom: 1px solid var(--card-border);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
+}
+/* accent hairline under the header */
+header::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 55%, transparent), transparent);
+}
+
+.header-clock {
+  margin-left: auto;
+  margin-right: 1rem;
+  text-align: right;
+  line-height: 1.15;
+  display: none;
+}
+@media (min-width: 560px) { .header-clock { display: block; } }
+.header-clock .clock-time {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+.header-clock .clock-greet {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .header-inner {
@@ -115,18 +178,22 @@ main {
 
 /* ── Section ───────────────────────────────────────────────────── */
 .section-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
   margin-bottom: 1rem;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.55rem;
 }
 
-.section-icon { font-size: 1.1rem; }
+.section-icon {
+  font-size: 1rem;
+  color: var(--accent);
+  font-weight: 700;
+}
 
 .section-refresh {
   background: none;
@@ -178,7 +245,9 @@ main {
 
 /* ── Base Card ─────────────────────────────────────────────────── */
 .card {
-  background: var(--card-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--text) 3%, transparent), transparent 40%),
+    var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: var(--radius);
   padding: 1.1rem 1.2rem;
@@ -302,25 +371,57 @@ body.dark .download-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
 /* ── Stat Card ─────────────────────────────────────────────────── */
 .stats-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 
-.stat-card { display: flex; flex-direction: column; gap: 0.4rem; }
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  position: relative;
+  overflow: hidden;
+  /* metric accent, overridden per-card via [data-metric] below */
+  --m: var(--accent);
+}
+/* Top accent stripe in the metric color */
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--m);
+  opacity: 0.9;
+}
+
+/* Metric color assignment (keyed off data-metric in the HTML) */
+.stat-card[data-metric="cpu"]    { --m: var(--m-cpu); }
+.stat-card[data-metric="load"]   { --m: var(--m-load); }
+.stat-card[data-metric="ram"]    { --m: var(--m-ram); }
+.stat-card[data-metric="swap"]   { --m: var(--m-swap); }
+.stat-card[data-metric="temp"]   { --m: var(--m-temp); }
+.stat-card[data-metric="power"]  { --m: var(--m-power); }
+.stat-card[data-metric="disk"]   { --m: var(--m-disk); }
+.stat-card[data-metric="net"]    { --m: var(--m-net); }
+.stat-card[data-metric="docker"] { --m: var(--m-docker); }
+.stat-card[data-metric="uptime"] { --m: var(--m-uptime); }
 
 .stat-label {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   color: var(--text-muted);
 }
 
 .stat-value {
-  font-size: 1.8rem;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.7rem;
   font-weight: 700;
-  letter-spacing: -0.03em;
-  color: var(--accent);
-  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--m);
+  line-height: 1.05;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--m) 28%, transparent);
 }
 
-.stat-value.uptime { font-size: 1.1rem; letter-spacing: -0.01em; }
+.stat-value.uptime { font-size: 1.05rem; letter-spacing: 0; }
 
 .stat-sub {
   font-size: 0.73rem;
@@ -338,13 +439,14 @@ body.dark .download-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
 .stat-bar {
   height: 100%;
   border-radius: 3px;
-  background: var(--accent);
+  background: var(--m, var(--accent));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--m, var(--accent)) 45%, transparent);
   width: 0%;
   transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.stat-bar.hot { background: var(--warning); }
-.stat-bar.critical { background: var(--offline); }
+.stat-bar.hot { background: var(--warning); box-shadow: 0 0 8px color-mix(in srgb, var(--warning) 45%, transparent); }
+.stat-bar.critical { background: var(--offline); box-shadow: 0 0 8px color-mix(in srgb, var(--offline) 45%, transparent); }
 
 /* ── Storage Volumes (per-volume breakdown) ────────────────────── */
 .volumes-card { grid-column: 1 / -1; }
@@ -923,5 +1025,189 @@ footer a:hover { text-decoration: underline; }
   color: #fff;
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   BATCH 6 — sparklines, tailnet, containers, command palette
+   ───────────────────────────────────────────────────────────────── */
 
+/* ── Sparklines ────────────────────────────────────────────────── */
+.spark {
+  display: block;
+  width: 100%;
+  height: 26px;
+  margin-top: 0.15rem;
+}
+.spark svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.spark polyline.spark-line {
+  fill: none;
+  stroke: var(--m, var(--accent));
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.spark polygon.spark-area {
+  fill: color-mix(in srgb, var(--m, var(--accent)) 14%, transparent);
+  stroke: none;
+}
+
+/* ── Tailscale devices ─────────────────────────────────────────── */
+.tailnet-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+
+.tailnet-card {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  position: relative;
+}
+.tailnet-card.offline { opacity: 0.62; }
+.ts-os {
+  font-size: 1.5rem;
+  width: 1.9rem;
+  text-align: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.ts-body { flex: 1; min-width: 0; }
+.ts-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ts-sub {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ts-self-tag {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* ── Docker containers ─────────────────────────────────────────── */
+.docker-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+
+.docker-card { display: flex; flex-direction: column; gap: 0.6rem; }
+.dk-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dk-metric { display: flex; flex-direction: column; gap: 0.25rem; }
+.dk-metric-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+.dk-metric-head .dk-val { font-family: var(--mono); color: var(--text); }
+.dk-bar-wrap {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bar-bg);
+  overflow: hidden;
+}
+.dk-bar {
+  height: 100%;
+  border-radius: 3px;
+  width: 0%;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.dk-bar.cpu { background: var(--m-cpu); }
+.dk-bar.mem { background: var(--m-ram); }
+.dk-bar.hot { background: var(--warning); }
+.dk-bar.critical { background: var(--offline); }
+
+/* ── Command palette ───────────────────────────────────────────── */
+.cmdk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh 1rem 1rem;
+}
+.cmdk-overlay[hidden] { display: none; }
+.cmdk {
+  width: 100%;
+  max-width: 560px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 76vh;
+}
+.cmdk-input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 1rem;
+  padding: 1rem 1.1rem;
+  outline: none;
+  border-bottom: 1px solid var(--card-border);
+}
+.cmdk-input::placeholder { color: var(--text-muted); }
+.cmdk-list { overflow-y: auto; padding: 0.4rem; }
+.cmdk-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.cmdk-item.active { background: var(--bg-alt); }
+.cmdk-item .ci-icon { width: 1.4rem; text-align: center; color: var(--accent); flex-shrink: 0; }
+.cmdk-item .ci-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmdk-item .ci-kind {
+  margin-left: auto;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.cmdk-empty { padding: 1.2rem; color: var(--text-muted); font-size: 0.85rem; text-align: center; }
+.cmdk-hint {
+  padding: 0.5rem 0.85rem;
+  border-top: 1px solid var(--card-border);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+kbd {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  background: var(--bg-alt);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
 

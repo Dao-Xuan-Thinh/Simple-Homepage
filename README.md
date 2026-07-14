@@ -1,12 +1,27 @@
 # Simple Homepage Dashboard
 
-A personal dashboard hosted on GitHub Pages that provides centralized access to self-hosted services, live system stats from a Mac mini, real-time Docker logs, and a self-updating list of downloadable GitHub projects. No code changes needed — manage services through a web-based settings modal, and downloads sync themselves straight from GitHub.
+A personal dashboard hosted on GitHub Pages that provides centralized access to self-hosted services, live system stats from a Mac mini, real-time Docker logs, Tailscale device status, and a self-updating list of downloadable GitHub projects. No code changes needed — manage services through a web-based settings modal, and downloads sync themselves straight from GitHub. Installable as a PWA on your phone.
 
 **Live Demo**: https://dao-xuan-thinh.github.io/Simple-Homepage/
 
 ---
 
 ## Features
+
+### ⇄ Tailscale devices
+- Shows which of your tailnet devices are **online / offline**, with OS, Tailscale IP, and last-seen
+- Reads `tailscale status --json` server-side (no sudo); `funnel-ingress-node` noise is filtered out
+- "This machine" is flagged; polled every ~20 s
+
+### ▣ Containers
+- Per-container **CPU / MEM** from `docker stats`, with mini bars; polled every ~15 s
+
+### ✨ Homelab console UI
+- Per-metric accent colors, card depth, monospace tabular numbers, soft glow on live values
+- **Live sparklines** under CPU / RAM / temperature / power (recent in-browser history)
+- **Command palette** — press <kbd>/</kbd> or <kbd>⌘K</kbd> to fuzzy-jump to any service, download, or device
+- Header **clock + greeting**; light/dark as before
+- **Installable PWA** — add to your phone home screen, offline app shell, real favicon
 
 ### 🔗 Project Links
 - Quick access to all your self-hosted projects (GitHub repos, documentation, media servers, etc.)
@@ -501,5 +516,5 @@ MIT — Feel free to fork, modify, and use for personal projects.
 
 ---
 
-**Last Updated**: 2026-07-13  
-**Current Version**: Batch 5 (live CPU/GPU temperature + memory fix + measured power via macmon)
+**Last Updated**: 2026-07-14  
+**Current Version**: Batch 6 (homelab-console UI refresh + Tailscale panel + sparklines + command palette + PWA + container stats)

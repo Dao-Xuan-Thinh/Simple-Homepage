@@ -379,7 +379,8 @@ function renderStats(d) {
   const tempSub = document.getElementById('stat-temp-sub');
   if (temp != null) {
     tempEl.textContent = temp + '°C';
-    tempEl.style.color = '';
+    // Heat coloring: cool = green, warm = metric amber (default), hot = red
+    tempEl.style.color = temp >= 70 ? 'var(--offline)' : temp < 55 ? 'var(--online)' : '';
     // Sub-line: GPU temp (macmon) and/or pressure level when available
     const bits = [];
     if (gpu_temp != null) bits.push(`GPU ${gpu_temp}°C`);
@@ -449,8 +450,10 @@ function renderStats(d) {
   // Per-volume disk breakdown (internal + external drives)
   renderVolumes(volumes);
 
-  // Reset text color (in case we were in error state)
-  ['stat-cpu','stat-ram','stat-swap','stat-temp','stat-net','stat-uptime','stat-diskio'].forEach(id => {
+  // Reset text color (in case we were in error state). Metric colors come from
+  // CSS (--m per data-metric); temp manages its own heat color, so it's excluded.
+  ['stat-cpu','stat-ram','stat-swap','stat-net','stat-uptime','stat-diskio',
+   'stat-power','stat-load','stat-nettotal','stat-docker'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.color = '';
   });
@@ -458,6 +461,42 @@ function renderStats(d) {
   setBar('bar-cpu',  cpu);
   setBar('bar-ram',  ram);
   setBar('bar-swap', swap ?? 0);
+
+  // Live sparklines (in-memory recent history)
+  pushSpark('cpu', cpu);
+  pushSpark('ram', ram);
+  pushSpark('temp', temp);
+  pushSpark('power', power_w);
+}
+
+/* ── Sparklines ─────────────────────────────────────────────────── */
+const SPARK_MAX = 60; // ~5 min at 5 s polling
+const _sparks = { cpu: [], ram: [], temp: [], power: [] };
+
+function pushSpark(key, val) {
+  if (val == null || isNaN(val)) return;
+  const buf = _sparks[key];
+  if (!buf) return;
+  buf.push(Number(val));
+  if (buf.length > SPARK_MAX) buf.shift();
+  renderSpark('spark-' + key, buf);
+}
+
+function renderSpark(id, series) {
+  const el = document.getElementById(id);
+  if (!el || series.length < 2) return;
+  const W = 100, H = 26, pad = 2;
+  let lo = Math.min(...series), hi = Math.max(...series);
+  if (hi - lo < 1e-6) { hi = lo + 1; lo -= 1; } // flat line -> center it
+  const n = series.length;
+  const x = i => (i / (n - 1)) * W;
+  const y = v => H - pad - ((v - lo) / (hi - lo)) * (H - 2 * pad);
+  const pts = series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const area = `${W},${H} 0,${H} ` + series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  el.innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
+    `<polygon class="spark-area" points="${area}"></polygon>` +
+    `<polyline class="spark-line" points="${pts}"></polyline></svg>`;
 }
 
 function renderVolumes(volumes) {
@@ -565,6 +604,231 @@ setInterval(async () => {
   const ok = await fetchAndRenderServices();
   if (!ok) renderServicesError();
 }, 30000);
+
+/* ─────────────────────────────────────────────────────────────────
+   TAILSCALE DEVICES
+   ───────────────────────────────────────────────────────────────── */
+
+// Simple, universally-rendering device glyphs by OS family (no emoji).
+function osGlyph(os) {
+  const o = String(os || '').toLowerCase();
+  if (o.includes('ios') || o.includes('ipad') || o.includes('android')) return '▯'; // phone/tablet
+  if (o.includes('mac') || o.includes('linux') || o.includes('windows') || o.includes('bsd')) return '▤'; // computer
+  return '▢';
+}
+
+function relTime(iso) {
+  if (!iso || String(iso).startsWith('0001')) return '';
+  const t = Date.parse(iso);
+  if (isNaN(t)) return '';
+  const s = Math.floor((Date.now() - t) / 1000);
+  if (s < 60)    return 'just now';
+  if (s < 3600)  return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+function renderTailnetCards(devices) {
+  const grid = document.getElementById('tailnet-grid');
+  if (!grid) return;
+  if (!Array.isArray(devices) || !devices.length) {
+    grid.innerHTML = '<div class="card placeholder-card">No devices found.</div>';
+    return;
+  }
+  grid.innerHTML = devices.map(d => {
+    const cls  = d.online ? 'online' : 'offline';
+    const self = d.is_self ? '<span class="ts-self-tag">this machine</span>' : '';
+    const seen = !d.online ? relTime(d.last_seen) : '';
+    const sub  = [escapeHtml(d.os || '?'), escapeHtml(d.ip || '')].filter(Boolean).join(' · ')
+               + (seen ? ` · seen ${seen}` : '');
+    return `<div class="card tailnet-card ${cls}">
+      <span class="ts-os">${osGlyph(d.os)}</span>
+      <div class="ts-body">
+        <div class="ts-name">${escapeHtml(d.name)}${self}</div>
+        <div class="ts-sub">${sub}</div>
+      </div>
+      <span class="status-dot ${cls}"></span>
+    </div>`;
+  }).join('');
+}
+
+async function fetchAndRenderTailnet() {
+  const data = await apiFetch('/api/tailscale');
+  if (!data || !data.devices) return false;
+  renderTailnetCards(data.devices);
+  const online = data.devices.filter(d => d.online).length;
+  const badge = document.getElementById('badge-tailnet');
+  if (badge) { badge.textContent = `${online}/${data.devices.length} online`; badge.className = 'badge badge-live'; }
+  return true;
+}
+
+setInterval(async () => {
+  const ok = await fetchAndRenderTailnet();
+  if (!ok) setBadgeError('badge-tailnet');
+}, 20000);
+
+/* ─────────────────────────────────────────────────────────────────
+   DOCKER CONTAINERS
+   ───────────────────────────────────────────────────────────────── */
+
+function renderDockerCards(containers) {
+  const grid = document.getElementById('docker-grid');
+  if (!grid) return;
+  if (!Array.isArray(containers) || !containers.length) {
+    grid.innerHTML = '<div class="card placeholder-card">No running containers.</div>';
+    return;
+  }
+  const heat = (v, hot, crit) => v >= crit ? ' critical' : v >= hot ? ' hot' : '';
+  grid.innerHTML = containers.map(c => {
+    const cpu = c.cpu_pct ?? 0;
+    const mem = c.mem_pct ?? 0;
+    return `<div class="card docker-card">
+      <div class="dk-name">${escapeHtml(c.name)}</div>
+      <div class="dk-metric">
+        <div class="dk-metric-head"><span>CPU</span><span class="dk-val">${cpu}%</span></div>
+        <div class="dk-bar-wrap"><div class="dk-bar cpu${heat(cpu, 60, 90)}" style="width:${Math.min(cpu, 100)}%"></div></div>
+      </div>
+      <div class="dk-metric">
+        <div class="dk-metric-head"><span>MEM</span><span class="dk-val">${escapeHtml(c.mem || mem + '%')}</span></div>
+        <div class="dk-bar-wrap"><div class="dk-bar mem${heat(mem, 75, 90)}" style="width:${Math.min(mem, 100)}%"></div></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function fetchAndRenderDocker() {
+  const data = await apiFetch('/api/docker');
+  if (!data || !data.containers) return false;
+  renderDockerCards(data.containers);
+  const badge = document.getElementById('badge-docker');
+  if (badge) { badge.textContent = `${data.containers.length} running`; badge.className = 'badge badge-live'; }
+  return true;
+}
+
+setInterval(async () => {
+  const ok = await fetchAndRenderDocker();
+  if (!ok) setBadgeError('badge-docker');
+}, 15000);
+
+/* ─────────────────────────────────────────────────────────────────
+   HEADER CLOCK + GREETING
+   ───────────────────────────────────────────────────────────────── */
+
+function updateClock() {
+  const now = new Date();
+  const h = now.getHours();
+  const greet = h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  const te = document.getElementById('clock-time');
+  const ge = document.getElementById('clock-greet');
+  if (te) te.textContent = now.toLocaleTimeString([], { hour12: false });
+  if (ge) ge.textContent = greet;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+/* ─────────────────────────────────────────────────────────────────
+   COMMAND PALETTE  ( / or Cmd/Ctrl-K )
+   ───────────────────────────────────────────────────────────────── */
+
+const cmdkOverlay = document.getElementById('cmdk-overlay');
+const cmdkInput   = document.getElementById('cmdk-input');
+const cmdkList    = document.getElementById('cmdk-list');
+let cmdkItems = [];
+let cmdkActive = 0;
+
+function buildCmdkIndex() {
+  const items = [];
+  document.querySelectorAll('.section-title').forEach(h => {
+    items.push({ name: h.textContent.replace(/\s+/g, ' ').trim(), kind: 'section', icon: '≡', el: h.closest('.section') });
+  });
+  document.querySelectorAll('#projects-grid .project-card').forEach(a => {
+    items.push({ name: (a.querySelector('.card-name')?.textContent || '').trim(), kind: 'project', icon: '◈', url: a.href });
+  });
+  document.querySelectorAll('#services-grid .server-card').forEach(c => {
+    items.push({ name: (c.querySelector('.server-name')?.textContent || '').trim(), kind: 'service', icon: '◉', el: c });
+  });
+  document.querySelectorAll('#downloads-grid .download-card').forEach(c => {
+    const a = c.querySelector('.card-name a');
+    items.push({ name: (a?.textContent || '').trim(), kind: 'download', icon: '↧', url: a?.href });
+  });
+  document.querySelectorAll('#tailnet-grid .tailnet-card').forEach(c => {
+    items.push({ name: (c.querySelector('.ts-name')?.textContent || '').trim(), kind: 'device', icon: '⇄', el: c });
+  });
+  return items.filter(i => i.name);
+}
+
+function fuzzyMatch(query, text) {
+  query = query.toLowerCase(); text = text.toLowerCase();
+  if (!query) return true;
+  let i = 0;
+  for (const ch of text) { if (ch === query[i]) i++; if (i === query.length) return true; }
+  return false;
+}
+
+function renderCmdkList() {
+  const q = cmdkInput.value.trim();
+  const matches = cmdkItems.filter(i => fuzzyMatch(q, i.name)).slice(0, 40);
+  if (cmdkActive >= matches.length) cmdkActive = 0;
+  if (!matches.length) {
+    cmdkList.innerHTML = '<div class="cmdk-empty">No matches</div>';
+    cmdkList._matches = [];
+    return;
+  }
+  cmdkList.innerHTML = matches.map((m, idx) =>
+    `<div class="cmdk-item ${idx === cmdkActive ? 'active' : ''}" data-idx="${idx}">
+      <span class="ci-icon">${m.icon}</span>
+      <span class="ci-name">${escapeHtml(m.name)}</span>
+      <span class="ci-kind">${m.kind}</span>
+    </div>`).join('');
+  cmdkList._matches = matches;
+}
+
+function activateCmdk(item) {
+  closeCmdk();
+  if (!item) return;
+  if (item.url) { window.open(item.url, '_blank', 'noopener'); return; }
+  if (item.el) {
+    item.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    item.el.style.transition = 'outline 0.2s';
+    item.el.style.outline = '2px solid var(--accent)';
+    setTimeout(() => { item.el.style.outline = ''; }, 1200);
+  }
+}
+
+function openCmdk() {
+  cmdkItems = buildCmdkIndex();
+  cmdkActive = 0;
+  cmdkInput.value = '';
+  cmdkOverlay.hidden = false;
+  renderCmdkList();
+  cmdkInput.focus();
+}
+function closeCmdk() { cmdkOverlay.hidden = true; }
+
+if (cmdkOverlay) {
+  cmdkInput.addEventListener('input', () => { cmdkActive = 0; renderCmdkList(); });
+  cmdkList.addEventListener('click', e => {
+    const item = e.target.closest('.cmdk-item');
+    if (item) activateCmdk((cmdkList._matches || [])[+item.dataset.idx]);
+  });
+  cmdkOverlay.addEventListener('click', e => { if (e.target === cmdkOverlay) closeCmdk(); });
+  cmdkInput.addEventListener('keydown', e => {
+    const matches = cmdkList._matches || [];
+    if (e.key === 'ArrowDown') { e.preventDefault(); cmdkActive = Math.min(cmdkActive + 1, matches.length - 1); renderCmdkList(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); cmdkActive = Math.max(cmdkActive - 1, 0); renderCmdkList(); }
+    else if (e.key === 'Enter') { e.preventDefault(); activateCmdk(matches[cmdkActive]); }
+    else if (e.key === 'Escape') { closeCmdk(); }
+  });
+}
+
+document.addEventListener('keydown', e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) ||
+                 document.activeElement?.isContentEditable;
+  if ((e.key === 'k' && (e.metaKey || e.ctrlKey)) || (e.key === '/' && !typing)) {
+    e.preventDefault();
+    if (cmdkOverlay) (cmdkOverlay.hidden ? openCmdk() : closeCmdk());
+  }
+});
 
 /* ─────────────────────────────────────────────────────────────────
    LOG VIEWER
@@ -1001,7 +1265,18 @@ btnSave.addEventListener('click', async () => {
   const svcOk = await fetchAndRenderServices();
   if (!svcOk) renderServicesError();
 
+  // 3b. Tailscale devices + Docker container stats
+  if (!(await fetchAndRenderTailnet())) setBadgeError('badge-tailnet');
+  if (!(await fetchAndRenderDocker()))  setBadgeError('badge-docker');
+
   // 4. Load logs for the first service
   refreshLog();
 })();
+
+/* ── PWA service worker ─────────────────────────────────────────── */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed:', err));
+  });
+}
 

@@ -68,8 +68,25 @@
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <div class="entry">
       <div class="entry-header">
-        <span class="entry-title">Batch 5 — Live temperature &amp; memory fix (macmon)</span>
+        <span class="entry-title">Batch 6 — UI refresh, Tailscale &amp; more</span>
         <span class="badge badge-latest">Latest</span>
+        <span class="entry-date">2026-07-14</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-ui">ui</span>"Homelab console" restyle — per-metric accent colors, card depth with top accent stripe, monospace tabular numbers, soft glow on live values, Unicode section glyphs, subtle gradient background</li>
+        <li><span class="tag tag-feat">feat</span>New <strong>Tailscale</strong> panel — which tailnet devices are online/offline, with OS, IP, and last-seen (funnel-ingress noise filtered out)</li>
+        <li><span class="tag tag-feat">feat</span>Live <strong>sparklines</strong> under CPU / RAM / temperature / power showing recent history</li>
+        <li><span class="tag tag-feat">feat</span><strong>Command palette</strong> — press <kbd>/</kbd> or <kbd>⌘K</kbd> to fuzzy-jump to any service, download, or device</li>
+        <li><span class="tag tag-feat">feat</span><strong>Installable PWA</strong> — add to your phone's home screen, offline app shell, real favicon, plus a header clock &amp; greeting</li>
+        <li><span class="tag tag-feat">feat</span><strong>Containers</strong> panel — per-container CPU/MEM from <code>docker stats</code></li>
+        <li><span class="tag tag-api">api</span>New <code>GET /api/tailscale</code> and <code>GET /api/docker</code> endpoints (short TTL cache)</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Batch 5 — Live temperature &amp; memory fix (macmon)</span>
         <span class="entry-date">2026-07-13</span>
       </div>
       <ul class="changes">

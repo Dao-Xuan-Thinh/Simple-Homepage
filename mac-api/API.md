@@ -406,6 +406,51 @@ Fetch service status from the last background health check.
 
 ---
 
+### GET /api/tailscale
+
+Tailnet devices and their online status. Runs `tailscale status --json` server-side
+(no sudo). `funnel-ingress-node` peers (no `OS`) are filtered out; results are cached ~15 s.
+
+**URL**: `/api/tailscale?token=<TOKEN>`
+
+**Response:**
+```json
+{
+  "devices": [
+    { "name": "My Biggest BeefSteak", "os": "macOS", "online": true, "ip": "100.77.158.48", "last_seen": "0001-01-01T00:00:00Z", "is_self": true },
+    { "name": "Galaxy J7 Prime", "os": "android", "online": true, "ip": "100.82.98.40", "last_seen": "2026-07-14T04:00:00Z", "is_self": false }
+  ],
+  "ts": 1784002684
+}
+```
+
+Sorted self-first, then online, then by name. `last_seen` is Tailscale's zero timestamp
+(`0001-...`) for actively-connected devices; the UI only shows it for offline devices.
+
+**Refresh Rate**: Call every ~20 seconds.
+
+---
+
+### GET /api/docker
+
+Per-container CPU/MEM from `docker stats --no-stream`. Cached ~12 s; empty list when Docker is down.
+
+**URL**: `/api/docker?token=<TOKEN>`
+
+**Response:**
+```json
+{
+  "containers": [
+    { "name": "immich_server", "cpu_pct": 0.2, "mem_pct": 19.3, "mem": "562.8MiB / 2.844GiB" }
+  ],
+  "ts": 1784002684
+}
+```
+
+Sorted by CPU descending. `cpu_pct` can exceed 100 (multi-core). **Refresh Rate**: ~15 seconds.
+
+---
+
 ### GET /api/logs
 
 Fetch Docker container logs or log file contents.
