@@ -68,8 +68,23 @@
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <div class="entry">
       <div class="entry-header">
-        <span class="entry-title">Batch 6 — UI refresh, Tailscale &amp; more</span>
+        <span class="entry-title">Batch 7 — Alert / overload event log</span>
         <span class="badge badge-latest">Latest</span>
+        <span class="entry-date">2026-07-21</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-feat">feat</span>New <strong>Alerts</strong> panel — a persistent log of when a stat went dangerously high, so you can see when the server was overloaded even when you weren't watching</li>
+        <li><span class="tag tag-feat">feat</span>Detection runs <strong>server-side 24/7</strong> in a background loop (not the browser), watching CPU, RAM, swap, CPU temperature, load average, and disk</li>
+        <li><span class="tag tag-feat">feat</span>Each breach is recorded as an <strong>episode</strong> with a start time, duration, and peak value; <code>warning</code> escalates to <code>critical</code> past the higher threshold</li>
+        <li><span class="tag tag-ui">ui</span>Edge-triggered with hysteresis + a 2-sample gate so brief spikes don't flood the log; the badge <strong>flashes</strong> when a new alert lands while you're viewing</li>
+        <li><span class="tag tag-api">api</span>New <code>GET /api/alerts</code> endpoint; episodes persist to <code>alerts.json</code> across restarts (last 200)</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Batch 6 — UI refresh, Tailscale &amp; more</span>
         <span class="entry-date">2026-07-14</span>
       </div>
       <ul class="changes">

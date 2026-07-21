@@ -711,6 +711,84 @@ setInterval(async () => {
 }, 15000);
 
 /* ─────────────────────────────────────────────────────────────────
+   ALERTS / OVERLOAD LOG
+   Episodes are detected + recorded server-side (24/7); we just render the
+   history here and flash the badge when a new one appears while you're viewing.
+   ───────────────────────────────────────────────────────────────── */
+
+function alertClock(epoch) {
+  return new Date(epoch * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+function alertDate(epoch) {
+  return new Date(epoch * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+// Compact elapsed time between two epoch-seconds values: "45s", "8m", "1h 12m".
+function alertDuration(from, to) {
+  const s = Math.max(0, (to || Math.floor(Date.now() / 1000)) - from);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+function alertSameDay(epoch) {
+  const d = new Date(epoch * 1000), n = new Date();
+  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+}
+
+let _lastAlertId = null;  // newest episode id at the previous render (drives the flash)
+
+function renderAlertRows(events) {
+  const box = document.getElementById('alert-log');
+  if (!box) return;
+  if (!Array.isArray(events) || !events.length) {
+    box.innerHTML = '<div class="alert-empty">No alerts — all clear.</div>';
+    return;
+  }
+  box.innerHTML = events.map(e => {
+    const ongoing = e.ended_at == null;
+    const lvl = e.level === 'critical' ? 'critical' : 'warning';
+    const start = (alertSameDay(e.started_at) ? '' : alertDate(e.started_at) + ' ') + alertClock(e.started_at);
+    const when = ongoing
+      ? `${start} · <span class="al-ongoing">ongoing ${alertDuration(e.started_at, null)}</span>`
+      : `${start} → ${alertClock(e.ended_at)} · ${alertDuration(e.started_at, e.ended_at)}`;
+    return `<div class="alert-row ${lvl}${ongoing ? ' ongoing' : ''}">
+      <span class="al-mark">${lvl === 'critical' ? '!!' : '!'}</span>
+      <span class="al-metric">${escapeHtml(e.label)}</span>
+      <span class="al-peak">peak ${escapeHtml(e.peak + (e.unit || ''))}</span>
+      <span class="al-level ${lvl}">${lvl === 'critical' ? 'crit' : 'warn'}</span>
+      <span class="al-when">${when}</span>
+    </div>`;
+  }).join('');
+}
+
+async function fetchAndRenderAlerts() {
+  const data = await apiFetch('/api/alerts');
+  if (!data || !data.events) return false;
+  renderAlertRows(data.events);
+
+  const active = data.events.filter(e => e.ended_at == null).length;
+  const badge = document.getElementById('badge-alerts');
+  if (badge) {
+    const n = data.events.length;
+    badge.textContent = active ? `${active} active` : `${n} event${n === 1 ? '' : 's'}`;
+    badge.className = 'badge ' + (active ? 'badge-error' : 'badge-live');
+    // In-page highlight: flash the badge when a new episode has appeared this session.
+    const newest = n ? data.events[0].id : null;
+    if (newest != null && _lastAlertId != null && newest !== _lastAlertId) {
+      void badge.offsetWidth;          // restart the animation
+      badge.classList.add('badge-flash');
+    }
+    _lastAlertId = newest;
+  }
+  return true;
+}
+
+setInterval(async () => {
+  const ok = await fetchAndRenderAlerts();
+  if (!ok) setBadgeError('badge-alerts');
+}, 30000);
+
+/* ─────────────────────────────────────────────────────────────────
    HEADER CLOCK + GREETING
    ───────────────────────────────────────────────────────────────── */
 
@@ -1265,9 +1343,10 @@ btnSave.addEventListener('click', async () => {
   const svcOk = await fetchAndRenderServices();
   if (!svcOk) renderServicesError();
 
-  // 3b. Tailscale devices + Docker container stats
+  // 3b. Tailscale devices + Docker container stats + alert/overload log
   if (!(await fetchAndRenderTailnet())) setBadgeError('badge-tailnet');
   if (!(await fetchAndRenderDocker()))  setBadgeError('badge-docker');
+  if (!(await fetchAndRenderAlerts()))  setBadgeError('badge-alerts');
 
   // 4. Load logs for the first service
   refreshLog();

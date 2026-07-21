@@ -18,6 +18,9 @@ Complete reference for the Mac Mini Stats API.
    - [GET /api/config](#get-apiconfig)
    - [PUT /api/config](#put-apiconfig)
    - [GET /api/services](#get-apiservices)
+   - [GET /api/tailscale](#get-apitailscale)
+   - [GET /api/docker](#get-apidocker)
+   - [GET /api/alerts](#get-apialerts)
    - [GET /api/logs](#get-apilogs)
 5. [Response Formats](#response-formats)
 6. [Examples](#examples)
@@ -448,6 +451,64 @@ Per-container CPU/MEM from `docker stats --no-stream`. Cached ~12 s; empty list 
 ```
 
 Sorted by CPU descending. `cpu_pct` can exceed 100 (multi-core). **Refresh Rate**: ~15 seconds.
+
+---
+
+### GET /api/alerts
+
+The **overload event log**: a persistent record of times a stat went dangerously high. Detection
+runs entirely server-side in a background loop (every ~20 s), so episodes are captured 24/7 — even
+when no browser tab is open. Persisted to `alerts.json` and kept across restarts (last 200 episodes).
+
+**URL**: `/api/alerts?limit=100&token=<TOKEN>`
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | int | 100 | Max episodes to return, newest first (1–200) |
+| `token` | string | (required) | API read token |
+
+**Response (200 OK):**
+
+```json
+{
+  "events": [
+    { "id": 178400268400, "metric": "cpu", "label": "CPU", "unit": "%", "level": "critical",
+      "threshold": 80, "peak": 98.4,
+      "started_at": 1784002600, "updated_at": 1784003080, "ended_at": 1784003100 },
+    { "id": 178399910003, "metric": "temp", "label": "CPU temp", "unit": "°C", "level": "warning",
+      "threshold": 75, "peak": 84.1,
+      "started_at": 1783999100, "updated_at": 1783999260, "ended_at": null }
+  ],
+  "rules": {
+    "cpu":  { "label": "CPU", "unit": "%", "warn": 80, "crit": 95 },
+    "load": { "label": "Load", "unit": "", "warn": 1.0, "crit": 2.0, "per_core": true }
+  },
+  "ts": 1784003200
+}
+```
+
+**Episode field descriptions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Stable identifier for the episode (`started_at × 100 + metric index`) |
+| `metric` | string | One of `cpu`, `ram`, `swap`, `temp`, `load`, `disk` |
+| `label` / `unit` | string | Display label and unit for the metric |
+| `level` | string | Highest severity reached: `"warning"` or `"critical"` |
+| `threshold` | float | The warn threshold that opened the episode (load resolved against core count) |
+| `peak` | float | Highest value observed during the episode |
+| `started_at` / `updated_at` / `ended_at` | int | Unix epoch (s). `ended_at` is `null` while the episode is still ongoing |
+
+**Detection semantics** (all server-side, see `alert_loop` in `server.py`):
+- An episode **opens** after a metric is above its `warn` threshold for 2 consecutive samples (~40 s) — brief spikes are ignored.
+- While open, it tracks the `peak` and escalates `warning → critical` if the value crosses `crit`.
+- It **closes** (sets `ended_at`) once the value drops below `warn − 5` (hysteresis, so a metric hovering at the line doesn't flap).
+- `rules` echoes the current thresholds. `load` warn/crit are multipliers against `psutil.cpu_count()`; the resolved absolute value is stored per-episode in `threshold`.
+- On restart, any episode left ongoing is finalized to its last-known time (live state can't be resumed).
+
+**Refresh Rate**: Call every ~30 seconds.
 
 ---
 

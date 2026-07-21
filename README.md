@@ -16,6 +16,13 @@ A personal dashboard hosted on GitHub Pages that provides centralized access to 
 ### ▣ Containers
 - Per-container **CPU / MEM** from `docker stats`, with mini bars; polled every ~15 s
 
+### ⚠ Alerts / overload log
+- A **persistent record of when a stat went dangerously high** — so you can see when the server was overloaded even though you weren't watching
+- Detection runs **entirely server-side, 24/7** (a background loop, not the browser), so nothing is missed when no tab is open
+- Watches CPU, RAM, swap, CPU temperature, load average, and disk; each breach becomes an **episode** with a start time, duration, and peak value
+- Edge-triggered with hysteresis and a 2-sample gate, so brief spikes don't flood the log; `warning` escalates to `critical` past the higher threshold
+- Persisted to `alerts.json` (git-ignored), kept across restarts (last 200). The badge **flashes** when a new alert lands while you're viewing
+
 ### ✨ Homelab console UI
 - Per-metric accent colors, card depth, monospace tabular numbers, soft glow on live values
 - **Live sparklines** under CPU / RAM / temperature / power (recent in-browser history)
@@ -111,7 +118,8 @@ untick to forget it immediately).
 2. **Status Updates**: Background thread (every 30s) checks service health via TCP/HTTP
 3. **Live Stats**: Dashboard polls `/api/stats` every ~5 seconds → CPU, RAM, disk, temp updated
 4. **Logs**: Log viewer polls `/api/logs` every 10 seconds → real-time Docker logs displayed
-5. **Config Changes**: User saves settings → `PUT /api/config` → server writes `config.json` → services re-rendered
+5. **Alerts**: A server background loop samples metrics every ~20s and records overload episodes to `alerts.json`; the dashboard polls `/api/alerts` every ~30s to show the history
+6. **Config Changes**: User saves settings → `PUT /api/config` → server writes `config.json` → services re-rendered
 
 ---
 
@@ -373,6 +381,29 @@ GET /api/logs?service=immich&lines=50&container=immich-database&token=...
 
 ---
 
+#### GET /api/alerts
+The overload event log — episodes where a stat crossed a "dangerous" threshold, detected server-side 24/7.
+
+**Query Parameters:**
+- `limit`: Max episodes to return, newest first (default 100, max 200)
+
+**Response:**
+```json
+{
+  "events": [
+    { "id": 178400268400, "metric": "cpu", "label": "CPU", "unit": "%", "level": "critical",
+      "threshold": 80, "peak": 98.4,
+      "started_at": 1784002600, "updated_at": 1784003080, "ended_at": 1784003100 }
+  ],
+  "rules": { "cpu": { "label": "CPU", "unit": "%", "warn": 80, "crit": 95 } },
+  "ts": 1784003200
+}
+```
+
+`ended_at` is `null` while an episode is ongoing. See [mac-api/API.md](mac-api/API.md#get-apialerts) for the full field list and detection semantics.
+
+---
+
 #### PUT /api/config
 Update configuration (requires `WRITE_TOKEN`).
 
@@ -516,5 +547,5 @@ MIT — Feel free to fork, modify, and use for personal projects.
 
 ---
 
-**Last Updated**: 2026-07-14  
-**Current Version**: Batch 6 (homelab-console UI refresh + Tailscale panel + sparklines + command palette + PWA + container stats)
+**Last Updated**: 2026-07-21  
+**Current Version**: Batch 7 (alert / overload event log — records when a stat goes dangerously high, server-side 24/7)

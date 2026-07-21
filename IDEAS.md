@@ -17,6 +17,7 @@ Add anything here as it comes up so it doesn't get lost.
 - [x] **Command palette** (`/` or ⌘K fuzzy jump) — Batch 6
 - [x] **PWA** (installable, offline shell, favicon) + header clock/greeting — Batch 6
 - [x] **Docker per-container stats** (CPU/MEM) — Batch 6
+- [x] **Alert / overload event log** (records when CPU/RAM/swap/temp/load/disk go dangerously high, server-side 24/7) — Batch 7
 
 ## Monitoring / stats (backlog)
 
@@ -27,10 +28,11 @@ Add anything here as it comes up so it doesn't get lost.
 - [ ] Disk SMART health / temperature per drive
 - [ ] Longer stat history with real charts (24h/7d) — needs a small time-series store
 - [ ] Sparklines for more metrics (network, load) + hover tooltips
+- [ ] Alert log follow-ups: web-editable thresholds, ack/clear button, per-volume disk alerts, service-downtime episodes
 
 ## Interaction / UX (backlog)
 
-- [ ] Browser notifications when a service drops offline
+- [ ] Browser/OS notifications when a new alert fires or a service drops offline (deferred in Batch 7 — chose in-page highlight only)
 - [ ] Command palette actions (not just navigation) — e.g. "open logs for X"
 - [ ] Auto light/dark by time of day
 - [ ] Weather widget in the header (needs an API key / a free source)

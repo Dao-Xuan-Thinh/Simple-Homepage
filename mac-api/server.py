@@ -15,6 +15,7 @@ Endpoints:
     GET  /api/services                        - live service + project status (cached)
     GET  /api/config                          - full project/service config (read)
     PUT  /api/config?token=<WRITE_TOKEN>      - update config (write, requires write token)
+    GET  /api/alerts?limit=100                - overload event log (stats that went dangerously high)
     GET  /api/logs?service=<id>&lines=50      - last N log lines
 
 CORS is pre-configured for dao-xuan-thinh.github.io and localhost.
@@ -99,6 +100,32 @@ ENERGY_FILE     = os.path.join(os.path.dirname(CONFIG_FILE), "energy.json")
 
 _energy      = {"total_wh": 0.0, "since": int(time.time()), "power_w": 0.0}
 _energy_lock = threading.Lock()
+
+# ── Alert / overload event log ──────────────────────────────────────────────────
+# A background loop samples key metrics and records "episodes" - continuous stretches
+# where a metric stays above a warn threshold - so the dashboard can show WHEN the
+# machine was under stress even while nobody was watching a browser tab. Episodes are
+# edge-triggered with hysteresis (see alert_loop) and persisted to alerts.json.
+ALERT_INTERVAL = 20    # seconds between samples
+ALERT_MARGIN   = 5     # hysteresis: an open episode only closes below (warn - margin)
+ALERT_CONSEC   = 2     # consecutive breaching samples required before an episode opens
+ALERT_MAX      = 200   # keep at most this many episodes (oldest dropped)
+ALERTS_FILE    = os.path.join(os.path.dirname(CONFIG_FILE), "alerts.json")
+
+# metric -> rule. warn/crit are absolute thresholds, except "load" whose warn/crit are
+# multipliers against the core count (resolved per-sample). unit is display-only.
+ALERT_RULES = {
+    "cpu":  {"label": "CPU",      "unit": "%",  "warn": 80,  "crit": 95},
+    "ram":  {"label": "RAM",      "unit": "%",  "warn": 85,  "crit": 95},
+    "swap": {"label": "Swap",     "unit": "%",  "warn": 40,  "crit": 75},
+    "temp": {"label": "CPU temp", "unit": "°C", "warn": 75,  "crit": 88},
+    "load": {"label": "Load",     "unit": "",   "warn": 1.0, "crit": 2.0, "per_core": True},
+    "disk": {"label": "Disk",     "unit": "%",  "warn": 85,  "crit": 95},
+}
+
+_alerts        = []    # list of episode dicts, oldest-first (active ones mutate in place)
+_alerts_active = {}    # metric -> the currently-open episode dict for that metric
+_alerts_lock   = threading.Lock()
 
 # ── Config helpers ────────────────────────────────────────────────────────────
 
@@ -212,6 +239,162 @@ def energy_loop():
             _energy["power_w"]   = round(watts, 2)
         save_energy(now)
         last_update = now
+
+
+# ── Alert / overload event log helpers ──────────────────────────────────────────
+
+def load_alerts():
+    """Load persisted episodes into _alerts. Any episode still marked ongoing at the
+    last shutdown is finalized to its last-known time - we can't resume live state
+    after a restart, so it becomes a closed historical entry."""
+    try:
+        with open(ALERTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return
+    except Exception as exc:
+        print(f"[alerts] Failed to load {ALERTS_FILE}: {exc}")
+        return
+    events = data.get("events", []) if isinstance(data, dict) else data
+    with _alerts_lock:
+        _alerts.clear()
+        for ev in events:
+            if ev.get("ended_at") is None:
+                ev["ended_at"] = ev.get("updated_at") or ev.get("started_at")
+            _alerts.append(ev)
+
+
+def save_alerts():
+    """Atomically persist the alert episode list (capped to the most recent ALERT_MAX)."""
+    with _alerts_lock:
+        data = {"events": _alerts[-ALERT_MAX:]}
+    tmp = ALERTS_FILE + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, ALERTS_FILE)
+    except Exception as exc:
+        print(f"[alerts] Failed to save {ALERTS_FILE}: {exc}")
+
+
+def _sample_alert_metrics():
+    """A lightweight metric snapshot for the alert loop: {cpu, ram, swap, temp, load,
+    disk}. Deliberately leaner than get_stats() (no docker/volumes/network) so the loop
+    stays cheap. Any value may be None if unavailable; the loop skips None metrics."""
+    out = {"cpu": None, "ram": None, "swap": None, "temp": None, "load": None, "disk": None}
+
+    try:
+        out["cpu"] = round(psutil.cpu_percent(interval=0.5), 1)
+    except Exception:
+        pass
+
+    # One macmon sample for temp + memory (matches get_stats); fall back to psutil.
+    mac = get_macmon()
+    if mac and mac.get("cpu_temp") is not None:
+        out["temp"] = round(mac["cpu_temp"], 1)
+    try:
+        if mac and mac.get("ram_used") and mac.get("ram_total"):
+            out["ram"] = round(mac["ram_used"] / mac["ram_total"] * 100, 1)
+            st = mac.get("swap_total") or 0
+            out["swap"] = round((mac.get("swap_used") or 0) / st * 100, 1) if st else 0.0
+        else:
+            vm = psutil.virtual_memory()
+            out["ram"]  = round((vm.total - vm.available) / vm.total * 100, 1)
+            out["swap"] = round(psutil.swap_memory().percent, 1)
+    except Exception:
+        pass
+
+    try:
+        out["load"] = round(os.getloadavg()[0], 2)
+    except Exception:
+        pass
+
+    for mount in ("/System/Volumes/Data", "/"):
+        try:
+            out["disk"] = round(psutil.disk_usage(mount).percent, 1)
+            break
+        except Exception:
+            continue
+
+    return out
+
+
+_ALERT_METRICS = list(ALERT_RULES)
+
+def _step_alerts(sample, now, cores, pending):
+    """Advance the alert state machine by one sample. Each metric is its own machine:
+      - opens an episode after ALERT_CONSEC consecutive samples above `warn`
+      - while open, tracks the peak and escalates warning -> critical at `crit`
+      - closes (sets ended_at) once the value drops below `warn - ALERT_MARGIN`
+    The hysteresis + consecutive-sample gate keep a metric hovering at the line from
+    spawning a flood of tiny entries. Mutates the module-level _alerts / _alerts_active
+    (under _alerts_lock) and the caller's `pending` dict; returns True if anything
+    changed. `now` is passed in (not read from the clock) so the logic is deterministic
+    and unit-testable."""
+    changed = False
+    with _alerts_lock:
+        for metric, rule in ALERT_RULES.items():
+            value = sample.get(metric)
+            if value is None:
+                continue
+            mult  = cores if rule.get("per_core") else 1
+            warn  = rule["warn"] * mult
+            crit  = rule["crit"] * mult
+            close = warn - ALERT_MARGIN
+            active = _alerts_active.get(metric)
+
+            if active is not None:
+                if value > active["peak"]:
+                    active["peak"] = round(value, 1)
+                if value >= crit and active["level"] != "critical":
+                    active["level"] = "critical"
+                if value >= close:
+                    active["updated_at"] = now      # still elevated
+                else:
+                    active["ended_at"] = now        # dropped clear of the band
+                    _alerts_active.pop(metric, None)
+                changed = True
+            elif value >= warn:
+                pending[metric] = pending.get(metric, 0) + 1
+                if pending[metric] >= ALERT_CONSEC:
+                    pending[metric] = 0
+                    ep = {
+                        "id":         now * 100 + _ALERT_METRICS.index(metric),
+                        "metric":     metric,
+                        "label":      rule["label"],
+                        "unit":       rule["unit"],
+                        "level":      "critical" if value >= crit else "warning",
+                        "threshold":  round(warn, 1),
+                        "peak":       round(value, 1),
+                        "started_at": now,
+                        "updated_at": now,
+                        "ended_at":   None,
+                    }
+                    _alerts.append(ep)
+                    _alerts_active[metric] = ep
+                    if len(_alerts) > ALERT_MAX:
+                        del _alerts[:len(_alerts) - ALERT_MAX]
+                    changed = True
+            else:
+                pending[metric] = 0
+    return changed
+
+
+def alert_loop():
+    """Background thread: every ALERT_INTERVAL seconds, sample metrics and feed them to
+    _step_alerts, persisting to alerts.json whenever the event log changes."""
+    load_alerts()
+    pending = {m: 0 for m in ALERT_RULES}
+    cores = psutil.cpu_count() or 1
+    while True:
+        time.sleep(ALERT_INTERVAL)
+        try:
+            sample = _sample_alert_metrics()
+        except Exception as exc:
+            print(f"[alerts] sample error: {exc}")
+            continue
+        if _step_alerts(sample, int(time.time()), cores, pending):
+            save_alerts()
 
 
 # ── Status checking ────────────────────────────────────────────────────────────
@@ -849,6 +1032,16 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 json_response(self, {"error": str(e)}, 500)
 
+        elif path == "/api/alerts":
+            try:
+                limit = int(qs.get("limit", ["100"])[0])
+                limit = max(1, min(limit, ALERT_MAX))
+                with _alerts_lock:
+                    events = list(reversed(_alerts[-limit:]))  # newest first
+                json_response(self, {"events": events, "rules": ALERT_RULES, "ts": int(time.time())})
+            except Exception as e:
+                json_response(self, {"error": str(e)}, 500)
+
         elif path == "/api/logs":
             service = qs.get("service", ["immich"])[0]
             container = qs.get("container", [None])[0]
@@ -922,6 +1115,7 @@ if __name__ == "__main__":
     threading.Thread(target=refresh_statuses, daemon=True).start()
     threading.Thread(target=status_refresh_loop, daemon=True).start()
     threading.Thread(target=energy_loop, daemon=True).start()
+    threading.Thread(target=alert_loop, daemon=True).start()
 
     try:
         server.serve_forever()
