@@ -15,6 +15,18 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="dark">
+  <script>
+    /* Apply the saved theme + skin before anything paints — deferring this to
+       app.js flashes the default look for a frame on every load. Runs here (not
+       in <head>) because it needs document.body to exist. */
+    (function () {
+      try {
+        var theme = localStorage.getItem('theme');
+        document.body.classList.toggle('dark', theme !== 'light');
+        document.body.dataset.skin = localStorage.getItem('skin') || 'bento';
+      } catch (e) { /* private mode / storage disabled — defaults apply */ }
+    })();
+  </script>
 
   <!-- ── Header ───────────────────────────────────────────────── -->
   <header>
@@ -28,6 +40,11 @@
         <div class="clock-greet" id="clock-greet">Hello</div>
       </div>
       <div class="header-actions">
+        <div class="skin-wrap">
+          <button id="skin-btn" aria-label="Change skin" aria-haspopup="true" aria-expanded="false"
+                  title="Change the look of the dashboard">◐</button>
+          <div class="skin-menu" id="skin-menu" role="menu" hidden></div>
+        </div>
         <button id="settings-btn" aria-label="Settings" title="Manage projects &amp; services">⚙️</button>
         <button id="theme-toggle" aria-label="Toggle theme" title="Toggle light / dark mode">
           <span id="theme-icon">☀️</span>
@@ -58,7 +75,7 @@
       <div class="cards-grid stats-grid">
 
         <!-- Processing -->
-        <div class="card stat-card" data-metric="cpu">
+        <div class="card stat-card" data-metric="cpu" data-expand="cpu">
           <div class="stat-label">CPU Usage</div>
           <div class="stat-value" id="stat-cpu">—</div>
           <div class="stat-bar-wrap"><div class="stat-bar" id="bar-cpu"></div></div>
@@ -66,14 +83,15 @@
           <span class="spark" id="spark-cpu"></span>
         </div>
 
-        <div class="card stat-card" data-metric="load">
+        <div class="card stat-card" data-metric="load" data-expand="load">
           <div class="stat-label">Load Average</div>
           <div class="stat-value" id="stat-load">—</div>
           <div class="stat-sub" id="stat-load-sub">1m · 5m · 15m</div>
+          <span class="spark" id="spark-load"></span>
         </div>
 
         <!-- Memory -->
-        <div class="card stat-card" data-metric="ram">
+        <div class="card stat-card" data-metric="ram" data-expand="ram">
           <div class="stat-label">RAM Usage</div>
           <div class="stat-value" id="stat-ram">—</div>
           <div class="stat-bar-wrap"><div class="stat-bar" id="bar-ram"></div></div>
@@ -81,22 +99,23 @@
           <span class="spark" id="spark-ram"></span>
         </div>
 
-        <div class="card stat-card" data-metric="swap">
+        <div class="card stat-card" data-metric="swap" data-expand="swap">
           <div class="stat-label">Swap</div>
           <div class="stat-value" id="stat-swap">—</div>
           <div class="stat-bar-wrap"><div class="stat-bar" id="bar-swap"></div></div>
           <div class="stat-sub" id="stat-swap-detail"></div>
+          <span class="spark" id="spark-swap"></span>
         </div>
 
         <!-- Thermal & power -->
-        <div class="card stat-card" data-metric="temp">
+        <div class="card stat-card" data-metric="temp" data-expand="temp">
           <div class="stat-label">Thermal</div>
           <div class="stat-value" id="stat-temp">—</div>
           <div class="stat-sub" id="stat-temp-sub">CPU temperature</div>
           <span class="spark" id="spark-temp"></span>
         </div>
 
-        <div class="card stat-card" data-metric="power">
+        <div class="card stat-card" data-metric="power" data-expand="power">
           <div class="stat-label">Power</div>
           <div class="stat-value" id="stat-power">—</div>
           <div class="stat-sub" id="stat-power-sub">system power</div>
@@ -110,10 +129,11 @@
           <div class="stat-sub">Read / Write per second</div>
         </div>
 
-        <div class="card stat-card" data-metric="net">
+        <div class="card stat-card" data-metric="net" data-expand="net">
           <div class="stat-label">Network</div>
           <div class="stat-value" id="stat-net">—</div>
           <div class="stat-sub">↑ Upload &nbsp;↓ Download (KB/s)</div>
+          <span class="spark mirrored" id="spark-net"></span>
         </div>
 
         <div class="card stat-card" data-metric="net">
@@ -136,8 +156,10 @@
         </div>
 
         <!-- Storage (full width) -->
-        <div class="card stat-card volumes-card">
+        <div class="card stat-card volumes-card" data-metric="disk" data-expand="disk">
           <div class="stat-label">Storage Volumes</div>
+          <div class="stat-sub" id="disk-trend">—</div>
+          <span class="spark" id="spark-disk"></span>
           <div class="volumes-list" id="volumes-list">
             <div class="stat-sub">—</div>
           </div>
@@ -243,6 +265,27 @@
         <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
         <span><kbd>↵</kbd> open</span>
         <span><kbd>esc</kbd> close</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Metric Detail Modal (click a stat card) ───────────────── -->
+  <div class="modal-overlay" id="metric-overlay" hidden>
+    <div class="modal metric-modal" role="dialog" aria-modal="true" aria-labelledby="metric-title">
+      <div class="modal-header">
+        <h2 id="metric-title">Metric</h2>
+        <button class="modal-close" id="metric-close" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="metric-ranges" id="metric-ranges" role="tablist">
+          <button class="range-btn active" data-minutes="30" role="tab">30m</button>
+          <button class="range-btn" data-minutes="360" role="tab">6h</button>
+          <button class="range-btn" data-minutes="1440" role="tab">24h</button>
+        </div>
+        <div class="metric-chart" id="metric-chart"></div>
+        <div class="metric-figures" id="metric-figures"></div>
+        <div class="metric-detail" id="metric-detail"></div>
+        <div class="metric-alerts" id="metric-alerts"></div>
       </div>
     </div>
   </div>

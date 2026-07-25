@@ -22,7 +22,96 @@ themeBtn.addEventListener('click', () => {
   const nowDark = !body.classList.contains('dark');
   applyTheme(nowDark);
   localStorage.setItem('theme', nowDark ? 'dark' : 'light');
+  syncThemeColor();
 });
+
+/* ── Skins ──────────────────────────────────────────────────────────
+   Whole-design prototypes to choose between, not palette swaps. A skin
+   sets body[data-skin] (which drives a full structural block in
+   style.css: layout, framing, typography, colour) and declares what
+   *form* its graphs take — see drawSpark. Light/dark stays independent. */
+const SKINS = [
+  { id: 'bento',   name: 'Bento',    chart: 'area',   desc: 'Asymmetric tiles, hero panels, big soft numbers' },
+  { id: 'ops',     name: 'Ops',      chart: 'bars',   desc: 'Monitoring rig — titled panels, column charts' },
+  { id: 'crt',     name: 'CRT',      chart: 'blocks', desc: 'Amber phosphor terminal, graphs drawn in text' },
+  { id: 'paper',   name: 'Paper',    chart: 'line',   desc: 'Editorial print — serif, hairlines, no fills' },
+  { id: 'classic', name: 'Classic',  chart: 'area',   desc: 'The original look, for comparison' },
+];
+
+// Which graph form the active skin uses. Drives drawSpark.
+function chartStyle() {
+  return (SKINS.find(s => s.id === currentSkin()) || {}).chart || 'area';
+}
+
+const skinBtn  = document.getElementById('skin-btn');
+const skinMenu = document.getElementById('skin-menu');
+
+function currentSkin() {
+  return body.dataset.skin || 'bento';
+}
+
+function applySkin(id) {
+  if (!SKINS.some(s => s.id === id)) id = 'bento';
+  body.dataset.skin = id;
+  localStorage.setItem('skin', id);
+  renderSkinMenu();
+  syncThemeColor();
+  // Graph *form* is part of the skin, so every chart has to be redrawn — a
+  // restyle alone can't turn an area chart into block characters.
+  Object.keys(_sparks).forEach(renderSpark);
+}
+
+// Keep the PWA / mobile browser chrome in step with the active skin. Read the
+// computed background rather than hardcoding, so it follows skin *and* mode.
+function syncThemeColor() {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  const bg = getComputedStyle(body).backgroundColor;
+  if (bg && bg !== 'transparent' && !bg.startsWith('rgba(0, 0, 0, 0)')) meta.content = bg;
+}
+
+function renderSkinMenu() {
+  if (!skinMenu) return;
+  const active = currentSkin();
+  skinMenu.innerHTML = SKINS.map(s => `
+    <button class="skin-opt${s.id === active ? ' active' : ''}" role="menuitem" data-skin="${s.id}">
+      <span class="skin-swatch" data-swatch="${s.id}"><i></i><i></i><i></i></span>
+      <span class="skin-text">
+        <span class="skin-name">${escapeHtml(s.name)}</span>
+        <span class="skin-desc">${escapeHtml(s.desc)}</span>
+      </span>
+      <span class="skin-check">${s.id === active ? '✓' : ''}</span>
+    </button>`).join('');
+}
+
+function toggleSkinMenu(open) {
+  if (!skinMenu || !skinBtn) return;
+  const show = open ?? skinMenu.hidden;
+  skinMenu.hidden = !show;
+  skinBtn.setAttribute('aria-expanded', String(show));
+}
+
+if (skinBtn && skinMenu) {
+  // Normalise whatever the boot script read from storage. A skin id from an older
+  // set no longer matches any CSS block, which would leave the page on the bare
+  // :root styling with nothing marked active in the menu.
+  if (!SKINS.some(s => s.id === currentSkin())) applySkin('bento');
+  renderSkinMenu();
+  skinBtn.addEventListener('click', e => { e.stopPropagation(); toggleSkinMenu(); });
+  skinMenu.addEventListener('click', e => {
+    const opt = e.target.closest('.skin-opt');
+    if (!opt) return;
+    applySkin(opt.dataset.skin);
+    toggleSkinMenu(false);
+  });
+  document.addEventListener('click', e => {
+    if (!skinMenu.hidden && !skinMenu.contains(e.target) && e.target !== skinBtn) toggleSkinMenu(false);
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !skinMenu.hidden) toggleSkinMenu(false);
+  });
+}
+syncThemeColor();
 
 /* ── Helpers ────────────────────────────────────────────────────── */
 
@@ -462,41 +551,574 @@ function renderStats(d) {
   setBar('bar-ram',  ram);
   setBar('bar-swap', swap ?? 0);
 
-  // Live sparklines (in-memory recent history)
+  // Live sparklines — extend the window seeded from /api/history
   pushSpark('cpu', cpu);
   pushSpark('ram', ram);
   pushSpark('temp', temp);
   pushSpark('power', power_w);
+  pushSpark('swap', swap);
+  pushSpark('load', load_1);
+  pushSpark('net_rx', net_rx);
+  pushSpark('net_tx', net_tx);
+  // Disk usage comes from the internal data volume in the volumes list, which is what
+  // the server's `disk` metric tracks — keeps the live series on the same basis as the
+  // seeded history rather than mixing in external drives.
+  const dataVol = Array.isArray(volumes)
+    ? volumes.find(v => v.internal) || volumes[0]
+    : null;
+  if (dataVol && dataVol.percent != null) pushSpark('disk', dataVol.percent);
+  renderDiskTrend();
 }
 
 /* ── Sparklines ─────────────────────────────────────────────────── */
-const SPARK_MAX = 60; // ~5 min at 5 s polling
-const _sparks = { cpu: [], ram: [], temp: [], power: [] };
+// Each buffer holds {t, v} samples (t = epoch seconds) rather than bare values, so
+// the x axis is real time: the server's 20 s history samples and the browser's 5 s
+// live samples can sit in the same series without distorting the shape. Buffers are
+// backfilled from /api/history on boot, so a freshly-opened tab already shows a full
+// window instead of drawing itself in from nothing.
+const SPARK_WINDOW_MIN = 30;
+const SPARK_WINDOW_S   = SPARK_WINDOW_MIN * 60;
+const _sparks = {
+  cpu: [], ram: [], temp: [], power: [],
+  swap: [], load: [], disk: [],
+  net_rx: [], net_tx: [],   // drawn together as one mirrored graph
+};
 
-function pushSpark(key, val) {
+// Per-metric vertical scaling. Metrics that genuinely idle near zero are anchored at
+// 0 so a spike reads as a spike (the network-graph look); the rest never approach
+// zero, so they're zoomed to their active band with a floor on the span to keep idle
+// noise from being magnified into fake mountains.
+const SPARK_CFG = {
+  cpu:   { zero: true,  minTop: 25,  fmt: v => Math.round(v) + '%' },
+  power: { zero: true,  minTop: 12,  fmt: v => v.toFixed(1) + ' W' },
+  swap:  { zero: true,  minTop: 20,  fmt: v => Math.round(v) + '%' },
+  load:  { zero: true,  minTop: 4,   fmt: v => v.toFixed(2) },
+  ram:   { zero: false, minSpan: 15, fmt: v => Math.round(v) + '%' },
+  temp:  { zero: false, minSpan: 10, fmt: v => Math.round(v) + '°C' },
+  // Disk usage barely moves hour to hour; a tight band makes the drift legible,
+  // which is the whole point of pairing it with the fill projection.
+  disk:  { zero: false, minSpan: 4,  fmt: v => v.toFixed(1) + '%' },
+};
+
+// The network pair is drawn as one mirrored graph (download up, upload down) in
+// #spark-net, so it routes to its own renderer rather than the generic one.
+const NET_KEYS = ['net_rx', 'net_tx'];
+
+function fmtRate(kbs) {
+  return kbs >= 1024 ? (kbs / 1024).toFixed(1) + ' MB/s' : Math.round(kbs) + ' KB/s';
+}
+
+function fmtSparkSpan(sec) {
+  if (sec < 90) return `${Math.round(sec)}s`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m`;
+  return `${(sec / 3600).toFixed(1)}h`;
+}
+
+function pushSpark(key, val, t) {
   if (val == null || isNaN(val)) return;
   const buf = _sparks[key];
   if (!buf) return;
-  buf.push(Number(val));
-  if (buf.length > SPARK_MAX) buf.shift();
-  renderSpark('spark-' + key, buf);
+  // Keep timestamps monotonic — the browser and the mini can disagree by a second or
+  // two, and an out-of-order point would draw a backwards segment.
+  const last = buf.length ? buf[buf.length - 1].t : 0;
+  let ts = t ?? Math.floor(Date.now() / 1000);
+  if (ts <= last) ts = last + 1;
+  buf.push({ t: ts, v: Number(val) });
+  const cutoff = ts - SPARK_WINDOW_S;
+  while (buf.length && buf[0].t < cutoff) buf.shift();
+  renderSpark(key);
 }
 
-function renderSpark(id, series) {
-  const el = document.getElementById(id);
-  if (!el || series.length < 2) return;
-  const W = 100, H = 26, pad = 2;
-  let lo = Math.min(...series), hi = Math.max(...series);
-  if (hi - lo < 1e-6) { hi = lo + 1; lo -= 1; } // flat line -> center it
-  const n = series.length;
-  const x = i => (i / (n - 1)) * W;
-  const y = v => H - pad - ((v - lo) / (hi - lo)) * (H - 2 * pad);
-  const pts = series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const area = `${W},${H} 0,${H} ` + series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+// Backfill the buffers from the server's history ring (sampled every ALERT_INTERVAL
+// seconds, 24/7) so the graphs are meaningful the moment the page loads.
+async function seedSparksFromHistory() {
+  const data = await apiFetch(`/api/history?minutes=${SPARK_WINDOW_MIN}`);
+  if (!data || !Array.isArray(data.points)) return false;  // keep whatever we have
+  const keys = Object.keys(_sparks);
+  keys.forEach(k => { _sparks[k].length = 0; });
+  for (const p of data.points) {
+    if (!p || p.t == null) continue;
+    for (const k of keys) {
+      if (p[k] != null && !isNaN(p[k])) _sparks[k].push({ t: p.t, v: Number(p[k]) });
+    }
+  }
+  keys.forEach(renderSpark);
+  return true;
+}
+
+// A backgrounded tab stops polling, leaving a hole in the series. Rather than drawing a
+// straight line across the gap, re-seed from the server ring — it kept sampling.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  const newest = Math.max(0, ...Object.values(_sparks).map(b => (b.length ? b[b.length - 1].t : 0)));
+  if (newest && (Date.now() / 1000 - newest) > 120) seedSparksFromHistory();
+});
+
+// Shared window geometry: the x axis is anchored to "now" but never wider than the
+// data we actually have, so a short buffer fills the box rather than drawing a stub
+// against the right edge. Returns null when there isn't enough to plot.
+function sparkWindow(...bufs) {
+  const filled = bufs.filter(b => b && b.length);
+  if (!filled.length) return null;
+  const newest = Math.max(...filled.map(b => b[b.length - 1].t));
+  const oldest = Math.min(...filled.map(b => b[0].t));
+  const now  = Math.max(Date.now() / 1000, newest);
+  const t0   = Math.max(oldest, now - SPARK_WINDOW_S);
+  const span = Math.max(now - t0, 30);
+  return { now, t0, span, x: t => ((t - t0) / span) * 300 };
+}
+
+// Network: download above the baseline, upload below, on a shared scale so the two
+// directions are comparable at a glance. The only metric where the two-direction
+// form is the right one — everything else reads better anchored at the bottom.
+function renderNetSpark() {
+  const el = document.getElementById('spark-net');
+  const rx = _sparks.net_rx, tx = _sparks.net_tx;
+  if (!el || (rx.length < 2 && tx.length < 2)) return;
+  const win = sparkWindow(rx, tx);
+  if (!win) return;
+
+  const W = 300, H = 100, MID = H / 2;
+  const inWin = b => b.filter(p => p.t >= win.t0);
+  const rxP = inWin(rx), txP = inWin(tx);
+  const peakRx = rxP.length ? Math.max(...rxP.map(p => p.v)) : 0;
+  const peakTx = txP.length ? Math.max(...txP.map(p => p.v)) : 0;
+  const scale  = Math.max(peakRx, peakTx, 1);   // shared, and never divide by zero
+
+  // dir +1 draws upward from the midline, -1 downward.
+  const trace = (pts, dir) => {
+    if (pts.length < 2) return '';
+    const y = v => MID - dir * (v / scale) * (MID - 1);
+    const line = pts.map(p => `${win.x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+    const area = `${win.x(pts[0].t).toFixed(1)},${MID} ${line} ${win.x(pts[pts.length - 1].t).toFixed(1)},${MID}`;
+    return `<polygon class="spark-area" points="${area}"></polygon>` +
+           `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>`;
+  };
+
   el.innerHTML =
     `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
+      `<g class="net-rx">${trace(rxP, 1)}</g>` +
+      `<g class="net-tx">${trace(txP, -1)}</g>` +
+      `<line class="spark-mid" x1="0" y1="${MID}" x2="${W}" y2="${MID}" ` +
+        `vector-effect="non-scaling-stroke"></line>` +
+    `</svg>` +
+    `<span class="spark-peak">↓ ${fmtRate(peakRx)}</span>` +
+    `<span class="spark-peak low">↑ ${fmtRate(peakTx)}</span>` +
+    `<span class="spark-span">${fmtSparkSpan(win.now - win.t0)}</span>`;
+}
+
+function renderSpark(key) {
+  if (NET_KEYS.includes(key)) return renderNetSpark();
+  const el  = document.getElementById('spark-' + key);
+  const buf = _sparks[key];
+  if (!el || !buf || buf.length < 2) return;
+  const cfg = SPARK_CFG[key] || { zero: true, minTop: 1, fmt: v => Math.round(v) };
+  const W = 300, H = 100;
+
+  const win = sparkWindow(buf);
+  if (!win) return;
+  const { now, t0 } = win;
+  const pts = buf.filter(p => p.t >= t0);
+  if (pts.length < 2) return;
+
+  const vals = pts.map(p => p.v);
+  const peak = Math.max(...vals);
+  let lo, hi;
+  if (cfg.zero) {
+    lo = 0;
+    hi = Math.max(peak * 1.15, cfg.minTop);
+  } else {
+    lo = Math.min(...vals);
+    hi = peak;
+    const short = cfg.minSpan - (hi - lo);
+    if (short > 0) { lo -= short / 2; hi += short / 2; }
+    const pad = (hi - lo) * 0.12;
+    lo -= pad; hi += pad;
+  }
+  if (hi - lo < 1e-6) hi = lo + 1;
+
+  const x = win.x;
+  const y = v => H - ((v - lo) / (hi - lo)) * H;
+  const norm = v => (v - lo) / (hi - lo);   // 0..1, for forms that don't use SVG coords
+
+  el.innerHTML =
+    drawSpark(chartStyle(), { pts, x, y, norm, W, H }) +
+    `<span class="spark-peak">${cfg.fmt(peak)}</span>` +
+    `<span class="spark-span">${fmtSparkSpan(now - t0)}</span>`;
+}
+
+/* ── Chart forms ────────────────────────────────────────────────────
+   A skin doesn't just recolour the graph, it changes what kind of graph
+   it is: filled area, bare stroke, discrete columns, or block characters
+   rendered as text. Each form takes the same scaled geometry. */
+function drawSpark(style, g) {
+  const { pts, x, y, norm, W, H } = g;
+
+  if (style === 'blocks') {
+    // Text, not vectors: downsample to a fixed column count and map each to one
+    // of the eighth-height block glyphs.
+    const GLYPHS = '▁▂▃▄▅▆▇█';
+    const COLS = 46;
+    const step = pts.length / COLS;
+    let out = '';
+    for (let i = 0; i < COLS; i++) {
+      const slice = pts.slice(Math.floor(i * step), Math.max(Math.floor((i + 1) * step), Math.floor(i * step) + 1));
+      if (!slice.length) continue;
+      const v = Math.max(...slice.map(p => p.v));
+      const idx = Math.min(GLYPHS.length - 1, Math.max(0, Math.round(norm(v) * (GLYPHS.length - 1))));
+      out += GLYPHS[idx];
+    }
+    return `<span class="spark-blocks" aria-hidden="true">${out}</span>`;
+  }
+
+  const line = pts.map(p => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+  const svg = inner =>
+    `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${inner}</svg>`;
+
+  if (style === 'bars') {
+    // One column per sample, with a gap. Widths come from the sample spacing so
+    // uneven intervals don't produce overlapping bars.
+    const n = pts.length;
+    const bw = Math.max(W / n * 0.68, 0.8);
+    const bars = pts.map(p => {
+      const top = y(p.v);
+      return `<rect class="spark-bar" x="${(x(p.t) - bw / 2).toFixed(1)}" y="${top.toFixed(1)}" ` +
+             `width="${bw.toFixed(1)}" height="${Math.max(H - top, 0.5).toFixed(1)}"></rect>`;
+    }).join('');
+    return svg(bars);
+  }
+
+  if (style === 'line') {
+    return svg(`<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>`);
+  }
+
+  // 'area' (default)
+  const area = `${x(pts[0].t).toFixed(1)},${H} ${line} ${x(pts[pts.length - 1].t).toFixed(1)},${H}`;
+  return svg(
     `<polygon class="spark-area" points="${area}"></polygon>` +
-    `<polyline class="spark-line" points="${pts}"></polyline></svg>`;
+    `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>`);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   METRIC DETAIL MODAL — click a stat card for the full graph
+   ───────────────────────────────────────────────────────────────── */
+
+// Which history series and which live detail belong to each card's data-metric.
+const METRIC_VIEWS = {
+  cpu:    { key: 'cpu',    title: 'CPU Usage' },
+  ram:    { key: 'ram',    title: 'RAM Usage' },
+  // The card graphs swap as a percentage, but alerts fire on absolute GB — macOS
+  // resizes its swap file, so the percentage is not something to alert on.
+  swap:   { key: 'swap',   title: 'Swap', alertMetric: 'swap_gb' },
+  temp:   { key: 'temp',   title: 'Thermal' },
+  power:  { key: 'power',  title: 'Power' },
+  load:   { key: 'load',   title: 'Load Average' },
+  disk:   { key: 'disk',   title: 'Storage' },
+  net:    { key: 'net_rx', title: 'Network', mirrored: true },
+};
+
+const metricOverlay = document.getElementById('metric-overlay');
+let _metricView = null;      // the METRIC_VIEWS entry currently open
+let _metricRange = 30;       // window in minutes
+
+function openMetric(metric) {
+  const view = METRIC_VIEWS[metric];
+  if (!view || !metricOverlay) return;
+  _metricView = view;
+  _metricRange = 30;
+  // Colour the whole modal with the clicked card's metric accent.
+  metricOverlay.style.setProperty('--m', `var(--m-${metric})`);
+  document.getElementById('metric-title').textContent = view.title;
+  document.querySelectorAll('#metric-ranges .range-btn').forEach(b => {
+    b.classList.toggle('active', Number(b.dataset.minutes) === _metricRange);
+  });
+  metricOverlay.hidden = false;
+  document.body.style.overflow = 'hidden';
+  loadMetricRange();
+}
+
+function closeMetric() {
+  if (!metricOverlay) return;
+  metricOverlay.hidden = true;
+  document.body.style.overflow = '';
+  _metricView = null;
+}
+
+// Draws into #metric-chart at a larger size than the card sparkline, with axis
+// labels. Bucketed windows carry min/avg/max, so those are drawn as a band behind
+// the average line rather than being flattened to a single trace.
+async function loadMetricRange() {
+  const view = _metricView;
+  const chart = document.getElementById('metric-chart');
+  if (!view || !chart) return;
+  chart.innerHTML = '<div class="metric-loading">Loading…</div>';
+
+  const data = await apiFetch(`/api/history?minutes=${_metricRange}`);
+  if (!data || !Array.isArray(data.points) || data.points.length < 2) {
+    chart.innerHTML = '<div class="metric-loading">Not enough history for this window yet.</div>';
+    document.getElementById('metric-figures').innerHTML = '';
+    return;
+  }
+
+  const bucketed = data.res === 'bucket';
+  const pick = (p, k) => {
+    const raw = p[k];
+    if (raw == null) return null;
+    return typeof raw === 'object' ? raw : { min: raw, avg: raw, max: raw };
+  };
+
+  if (view.mirrored) {
+    renderBigNetChart(chart, data.points, pick);
+  } else {
+    renderBigChart(chart, data.points, view.key, pick, bucketed);
+  }
+  renderMetricFigures(data.points, view, pick);
+  renderMetricDetail(view);
+  renderMetricAlerts(view, data.points[0].t);
+}
+
+function renderBigChart(chart, points, key, pick, bucketed) {
+  const series = points.map(p => ({ t: p.t, s: pick(p, key) })).filter(p => p.s);
+  if (series.length < 2) {
+    chart.innerHTML = '<div class="metric-loading">No data for this metric in this window.</div>';
+    return;
+  }
+  const cfg = SPARK_CFG[key] || { zero: true, minTop: 1, fmt: v => Math.round(v) };
+  const W = 600, H = 200;
+  const t0 = series[0].t, t1 = series[series.length - 1].t;
+  const span = Math.max(t1 - t0, 1);
+
+  const peak = Math.max(...series.map(p => p.s.max));
+  const low  = Math.min(...series.map(p => p.s.min));
+  let lo, hi;
+  if (cfg.zero) {
+    lo = 0; hi = Math.max(peak * 1.1, cfg.minTop);
+  } else {
+    lo = low; hi = peak;
+    const short = (cfg.minSpan || 1) - (hi - lo);
+    if (short > 0) { lo -= short / 2; hi += short / 2; }
+    const pad = (hi - lo) * 0.1;
+    lo -= pad; hi += pad;
+  }
+  if (hi - lo < 1e-6) hi = lo + 1;
+
+  const x = t => ((t - t0) / span) * W;
+  const y = v => H - ((v - lo) / (hi - lo)) * H;
+  const line = series.map(p => `${x(p.t).toFixed(1)},${y(p.s.avg).toFixed(1)}`).join(' ');
+  const area = `${x(t0).toFixed(1)},${H} ${line} ${x(t1).toFixed(1)},${H}`;
+
+  // min–max envelope: forward along the maxima, back along the minima.
+  let band = '';
+  if (bucketed) {
+    const up = series.map(p => `${x(p.t).toFixed(1)},${y(p.s.max).toFixed(1)}`);
+    const dn = series.slice().reverse().map(p => `${x(p.t).toFixed(1)},${y(p.s.min).toFixed(1)}`);
+    band = `<polygon class="chart-band" points="${up.concat(dn).join(' ')}"></polygon>`;
+  }
+
+  chart.innerHTML =
+    `<div class="chart-box">` +
+      `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
+        band +
+        `<polygon class="spark-area" points="${area}"></polygon>` +
+        `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>` +
+      `</svg>` +
+      `<span class="axis-hi">${cfg.fmt(hi)}</span>` +
+      `<span class="axis-lo">${cfg.fmt(lo)}</span>` +
+    `</div>` +
+    `<div class="chart-times"><span>${alertClock(t0)}</span><span>${alertClock(t1)}</span></div>` +
+    (bucketed ? '<div class="chart-note">Shaded band = min–max within each 5-minute bucket</div>' : '');
+}
+
+function renderBigNetChart(chart, points, pick) {
+  const rx = points.map(p => ({ t: p.t, s: pick(p, 'net_rx') })).filter(p => p.s);
+  const tx = points.map(p => ({ t: p.t, s: pick(p, 'net_tx') })).filter(p => p.s);
+  if (rx.length < 2 && tx.length < 2) {
+    chart.innerHTML = '<div class="metric-loading">No network samples in this window yet.</div>';
+    return;
+  }
+  const all = rx.concat(tx);
+  const W = 600, H = 200, MID = H / 2;
+  const t0 = Math.min(...all.map(p => p.t)), t1 = Math.max(...all.map(p => p.t));
+  const span = Math.max(t1 - t0, 1);
+  const peakRx = rx.length ? Math.max(...rx.map(p => p.s.max)) : 0;
+  const peakTx = tx.length ? Math.max(...tx.map(p => p.s.max)) : 0;
+  const scale = Math.max(peakRx, peakTx, 1);
+
+  const x = t => ((t - t0) / span) * W;
+  const trace = (pts, dir) => {
+    if (pts.length < 2) return '';
+    const y = v => MID - dir * (v / scale) * (MID - 1);
+    const line = pts.map(p => `${x(p.t).toFixed(1)},${y(p.s.avg).toFixed(1)}`).join(' ');
+    const area = `${x(pts[0].t).toFixed(1)},${MID} ${line} ${x(pts[pts.length - 1].t).toFixed(1)},${MID}`;
+    return `<polygon class="spark-area" points="${area}"></polygon>` +
+           `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>`;
+  };
+
+  chart.innerHTML =
+    `<div class="chart-box">` +
+      `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
+        `<g class="net-rx">${trace(rx, 1)}</g>` +
+        `<g class="net-tx">${trace(tx, -1)}</g>` +
+        `<line class="spark-mid" x1="0" y1="${MID}" x2="${W}" y2="${MID}" vector-effect="non-scaling-stroke"></line>` +
+      `</svg>` +
+      `<span class="axis-hi">↓ ${fmtRate(peakRx)}</span>` +
+      `<span class="axis-lo">↑ ${fmtRate(peakTx)}</span>` +
+    `</div>` +
+    `<div class="chart-times"><span>${alertClock(t0)}</span><span>${alertClock(t1)}</span></div>`;
+}
+
+function renderMetricFigures(points, view, pick) {
+  const box = document.getElementById('metric-figures');
+  if (!box) return;
+  const keys = view.mirrored ? ['net_rx', 'net_tx'] : [view.key];
+  const rows = keys.map(k => {
+    const s = points.map(p => pick(p, k)).filter(Boolean);
+    if (!s.length) return '';
+    const cfg = SPARK_CFG[k];
+    const fmt = view.mirrored ? fmtRate : (cfg ? cfg.fmt : (v => Math.round(v)));
+    const avg = s.reduce((a, b) => a + b.avg, 0) / s.length;
+    const label = view.mirrored ? (k === 'net_rx' ? 'Download' : 'Upload') : 'Now';
+    const nowVal = s[s.length - 1].avg;
+    return `<div class="fig-row">
+      <span class="fig-label">${label}</span>
+      <span class="fig"><b>${fmt(nowVal)}</b><i>current</i></span>
+      <span class="fig"><b>${fmt(Math.max(...s.map(v => v.max)))}</b><i>peak</i></span>
+      <span class="fig"><b>${fmt(avg)}</b><i>avg</i></span>
+      <span class="fig"><b>${fmt(Math.min(...s.map(v => v.min)))}</b><i>min</i></span>
+    </div>`;
+  }).join('');
+  box.innerHTML = rows;
+}
+
+// Live specifics that don't come from the history series — read straight off the
+// cards, which are already kept current by the stats poll.
+function renderMetricDetail(view) {
+  const box = document.getElementById('metric-detail');
+  if (!box) return;
+  const txt = id => (document.getElementById(id)?.textContent || '').trim();
+  const bits = {
+    cpu:   () => [txt('stat-cpu-freq'), txt('stat-load-sub')],
+    ram:   () => [txt('stat-ram-detail'), 'Swap ' + txt('stat-swap')],
+    swap:  () => [txt('stat-swap-detail')],
+    temp:  () => [txt('stat-temp-sub')],
+    power: () => [txt('stat-power-sub')],
+    load:  () => [txt('stat-load-sub')],
+    disk:  () => [txt('disk-trend')],
+    net:   () => [txt('stat-nettotal') + ' since boot'],
+  }[view.key === 'net_rx' ? 'net' : view.key];
+  const parts = (bits ? bits() : []).filter(s => s && s !== '—');
+  box.innerHTML = parts.length ? parts.map(escapeHtml).join(' · ') : '';
+}
+
+// Episodes for this metric that overlap the visible window.
+function renderMetricAlerts(view, windowStart) {
+  const box = document.getElementById('metric-alerts');
+  if (!box) return;
+  const metric = view.alertMetric || (view.key === 'net_rx' ? null : view.key);
+  const hits = (_lastAlertEvents || []).filter(e =>
+    e.kind !== 'service' && e.metric === metric && (e.ended_at ?? Infinity) >= windowStart);
+  box.innerHTML = hits.length
+    ? `<div class="metric-alerts-title">${hits.length} alert${hits.length === 1 ? '' : 's'} in this window</div>` +
+      hits.slice(0, 5).map(e =>
+        `<div class="ma-row"><span class="al-level ${e.level}">${e.level === 'critical' ? 'crit' : 'warn'}</span>` +
+        `<span>peak ${escapeHtml(e.peak + (e.unit || ''))}</span>` +
+        `<span class="al-when">${alertClock(e.started_at)}</span></div>`).join('')
+    : '<div class="metric-alerts-title muted">No alerts for this metric in this window</div>';
+}
+
+if (metricOverlay) {
+  document.getElementById('metric-close').addEventListener('click', closeMetric);
+  metricOverlay.addEventListener('click', e => { if (e.target === metricOverlay) closeMetric(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !metricOverlay.hidden) closeMetric();
+  });
+  document.getElementById('metric-ranges').addEventListener('click', e => {
+    const btn = e.target.closest('.range-btn');
+    if (!btn) return;
+    _metricRange = Number(btn.dataset.minutes);
+    document.querySelectorAll('#metric-ranges .range-btn')
+      .forEach(b => b.classList.toggle('active', b === btn));
+    loadMetricRange();
+  });
+
+  // Expandability is opted into per card with data-expand, not derived from
+  // data-metric: the latter drives colour and is shared (Disk I/O and Storage are both
+  // "disk"), and cards with nothing to plot (uptime, docker counts) must stay inert
+  // rather than opening an empty modal.
+  document.querySelectorAll('.stat-card[data-expand]').forEach(card => {
+    const metric = card.dataset.expand;
+    if (!METRIC_VIEWS[metric]) return;
+    card.classList.add('expandable');
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('title', 'Click for the full graph');
+    card.addEventListener('click', () => openMetric(metric));
+    card.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMetric(metric); }
+    });
+  });
+}
+
+/* ── Disk fill projection ───────────────────────────────────────────
+   A least-squares fit over the persisted 5-minute buckets turns the disk
+   series into a percent-per-day drift, and from there an estimate of when
+   it reaches the 95% critical threshold. Anything under a day of history
+   is noise, so it says so rather than inventing a number. */
+let _diskTrend = null;
+
+function diskSlope(pts) {
+  if (pts.length < 2) return null;
+  const hours = (pts[pts.length - 1].t - pts[0].t) / 3600;
+  if (hours < 24) return { hours, insufficient: true };
+
+  const t0 = pts[0].t, n = pts.length;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const p of pts) {
+    const x = (p.t - t0) / 86400;          // days since the first sample
+    sx += x; sy += p.v; sxx += x * x; sxy += x * p.v;
+  }
+  const denom = n * sxx - sx * sx;
+  if (Math.abs(denom) < 1e-9) return { hours, insufficient: true };
+
+  const perDay = (n * sxy - sx * sy) / denom;
+  const latest = pts[pts.length - 1].v;
+  return {
+    hours, perDay, latest,
+    daysToCrit: perDay > 0.01 ? (95 - latest) / perDay : null,
+  };
+}
+
+async function fetchDiskTrend() {
+  const data = await apiFetch('/api/history?minutes=10080');   // 7 days of buckets
+  if (!data || !Array.isArray(data.points)) return false;
+  const pts = data.points
+    .map(p => ({ t: p.t, v: (p.disk && p.disk.avg != null) ? p.disk.avg : p.disk }))
+    .filter(p => typeof p.v === 'number' && !isNaN(p.v));
+  _diskTrend = diskSlope(pts);
+  renderDiskTrend();
+  return true;
+}
+
+function renderDiskTrend() {
+  const el = document.getElementById('disk-trend');
+  if (!el) return;
+  const t = _diskTrend;
+  if (!t) { el.textContent = 'collecting usage history…'; return; }
+  if (t.insufficient) {
+    el.textContent = `collecting usage history — ${Math.round(t.hours)}h of 24h`;
+    return;
+  }
+  if (t.perDay > 0.01) {
+    const bits = [`+${t.perDay.toFixed(2)}%/day`];
+    if (t.daysToCrit != null && t.daysToCrit < 400) {
+      bits.push(t.daysToCrit < 1 ? 'hits 95% within a day' : `95% in ~${Math.round(t.daysToCrit)} days`);
+    }
+    el.textContent = bits.join(' · ');
+  } else if (t.perDay < -0.01) {
+    el.textContent = `${t.perDay.toFixed(2)}%/day · freeing up`;
+  } else {
+    el.textContent = 'stable';
+  }
 }
 
 function renderVolumes(volumes) {
@@ -736,6 +1358,7 @@ function alertSameDay(epoch) {
 }
 
 let _lastAlertId = null;  // newest episode id at the previous render (drives the flash)
+let _lastAlertEvents = [];
 
 function renderAlertRows(events) {
   const box = document.getElementById('alert-log');
@@ -747,15 +1370,24 @@ function renderAlertRows(events) {
   box.innerHTML = events.map(e => {
     const ongoing = e.ended_at == null;
     const lvl = e.level === 'critical' ? 'critical' : 'warning';
+    // Episodes written before service outages existed have no `kind` — treat those
+    // as metric episodes so an older alerts.json still renders.
+    const isService = e.kind === 'service';
     const start = (alertSameDay(e.started_at) ? '' : alertDate(e.started_at) + ' ') + alertClock(e.started_at);
     const when = ongoing
       ? `${start} · <span class="al-ongoing">ongoing ${alertDuration(e.started_at, null)}</span>`
       : `${start} → ${alertClock(e.ended_at)} · ${alertDuration(e.started_at, e.ended_at)}`;
-    return `<div class="alert-row ${lvl}${ongoing ? ' ongoing' : ''}">
-      <span class="al-mark">${lvl === 'critical' ? '!!' : '!'}</span>
+    // A service is either reachable or not — there's no peak or threshold to show,
+    // so that column carries the outage duration instead.
+    const detail = isService
+      ? `<span class="al-peak">unreachable</span>
+         <span class="al-level down">down</span>`
+      : `<span class="al-peak">peak ${escapeHtml(e.peak + (e.unit || ''))}</span>
+         <span class="al-level ${lvl}">${lvl === 'critical' ? 'crit' : 'warn'}</span>`;
+    return `<div class="alert-row ${lvl}${ongoing ? ' ongoing' : ''}${isService ? ' service' : ''}">
+      <span class="al-mark">${isService ? '×' : (lvl === 'critical' ? '!!' : '!')}</span>
       <span class="al-metric">${escapeHtml(e.label)}</span>
-      <span class="al-peak">peak ${escapeHtml(e.peak + (e.unit || ''))}</span>
-      <span class="al-level ${lvl}">${lvl === 'critical' ? 'crit' : 'warn'}</span>
+      ${detail}
       <span class="al-when">${when}</span>
     </div>`;
   }).join('');
@@ -764,6 +1396,7 @@ function renderAlertRows(events) {
 async function fetchAndRenderAlerts() {
   const data = await apiFetch('/api/alerts');
   if (!data || !data.events) return false;
+  _lastAlertEvents = data.events;   // reused by the metric modal's per-metric list
   renderAlertRows(data.events);
 
   const active = data.events.filter(e => e.ended_at == null).length;
@@ -832,6 +1465,9 @@ function buildCmdkIndex() {
   document.querySelectorAll('#tailnet-grid .tailnet-card').forEach(c => {
     items.push({ name: (c.querySelector('.ts-name')?.textContent || '').trim(), kind: 'device', icon: '⇄', el: c });
   });
+  SKINS.forEach(s => {
+    items.push({ name: `Skin: ${s.name}`, kind: 'skin', icon: '◐', run: () => applySkin(s.id) });
+  });
   return items.filter(i => i.name);
 }
 
@@ -864,6 +1500,7 @@ function renderCmdkList() {
 function activateCmdk(item) {
   closeCmdk();
   if (!item) return;
+  if (item.run) { item.run(); return; }
   if (item.url) { window.open(item.url, '_blank', 'noopener'); return; }
   if (item.el) {
     item.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1335,7 +1972,8 @@ btnSave.addEventListener('click', async () => {
   // 1b. Downloads — sourced from GitHub, independent of the Mac mini API
   initDownloads();
 
-  // 2. Load stats
+  // 2. Backfill sparkline history (server-side ring), then load live stats
+  await seedSparksFromHistory();
   const statsOk = await fetchAndRenderStats();
   if (!statsOk) renderStatsError();
 
@@ -1347,6 +1985,10 @@ btnSave.addEventListener('click', async () => {
   if (!(await fetchAndRenderTailnet())) setBadgeError('badge-tailnet');
   if (!(await fetchAndRenderDocker()))  setBadgeError('badge-docker');
   if (!(await fetchAndRenderAlerts()))  setBadgeError('badge-alerts');
+
+  // 3c. Disk fill trend — needs the long (bucketed) history, so it's its own fetch.
+  fetchDiskTrend();
+  setInterval(fetchDiskTrend, 10 * 60 * 1000);
 
   // 4. Load logs for the first service
   refreshLog();

@@ -20,12 +20,23 @@ A personal dashboard hosted on GitHub Pages that provides centralized access to 
 - A **persistent record of when a stat went dangerously high** — so you can see when the server was overloaded even though you weren't watching
 - Detection runs **entirely server-side, 24/7** (a background loop, not the browser), so nothing is missed when no tab is open
 - Watches CPU, RAM, swap, CPU temperature, load average, and disk; each breach becomes an **episode** with a start time, duration, and peak value
+- Swap is measured in **absolute GB**, not as a percentage of the swap file — macOS resizes that file on demand, so the percentage is a sawtooth that says nothing about memory pressure
 - Edge-triggered with hysteresis and a 2-sample gate, so brief spikes don't flood the log; `warning` escalates to `critical` past the higher threshold
+- Also logs **service outages** — the 30s health probe feeds the same episode machinery, so "Immich was down 14:02 → 14:19" lands in the same list as a CPU spike
 - Persisted to `alerts.json` (git-ignored), kept across restarts (last 200). The badge **flashes** when a new alert lands while you're viewing
 
 ### ✨ Homelab console UI
 - Per-metric accent colors, card depth, monospace tabular numbers, soft glow on live values
-- **Live sparklines** under CPU / RAM / temperature / power (recent in-browser history)
+- **Five selectable skins** — pick from the header (`◐`) or the command palette; each has light and dark. These are whole designs, not palette swaps: layout, framing, typography and the *form the graphs take* all change
+  - **Bento** — asymmetric tile wall, hero panels for CPU/RAM, borderless and rounded. Area charts
+  - **Ops** — monitoring rig; every card is a titled panel over a ruled plot area. Column charts
+  - **CRT** — amber phosphor terminal with scanlines; graphs are drawn in block characters, not vectors
+  - **Paper** — editorial print; serif, hairline rules, no boxes. Bare stroke charts, no fills
+  - **Classic** — the original, kept for comparison
+- **30-minute sparklines** on CPU / RAM / swap / load / temperature / power / disk — backfilled from the server's history, so the window is real the moment the page opens
+- **Mirrored network graph** — download above the baseline, upload below, on a shared scale
+- **Click any stat card** for the full graph over 30m / 6h / 24h, with peak/avg/min, live detail, and the alerts recorded in that window
+- **Disk fill projection** — a least-squares fit over 7 days of history gives percent-per-day drift and an estimate of when the volume hits 95%
 - **Command palette** — press <kbd>/</kbd> or <kbd>⌘K</kbd> to fuzzy-jump to any service, download, or device
 - Header **clock + greeting**; light/dark as before
 - **Installable PWA** — add to your phone home screen, offline app shell, real favicon
@@ -119,7 +130,8 @@ untick to forget it immediately).
 3. **Live Stats**: Dashboard polls `/api/stats` every ~5 seconds → CPU, RAM, disk, temp updated
 4. **Logs**: Log viewer polls `/api/logs` every 10 seconds → real-time Docker logs displayed
 5. **Alerts**: A server background loop samples metrics every ~20s and records overload episodes to `alerts.json`; the dashboard polls `/api/alerts` every ~30s to show the history
-6. **Config Changes**: User saves settings → `PUT /api/config` → server writes `config.json` → services re-rendered
+6. **History**: The same loop records every sample into a fine in-memory ring (~1h) and 5-minute min/avg/max buckets persisted to `history.json` (7 days). The dashboard fetches `/api/history` on load for the 30-minute sparklines and on demand for the expanded 6h/24h views
+7. **Config Changes**: User saves settings → `PUT /api/config` → server writes `config.json` → services re-rendered
 
 ---
 
@@ -404,6 +416,33 @@ The overload event log — episodes where a stat crossed a "dangerous" threshold
 
 ---
 
+#### GET /api/history
+Metric history from the same 24/7 loop that feeds `/api/alerts`, in two tiers: **fine** (every ~20s
+sample, ~1h, in memory) and **bucket** (5-minute min/avg/max, 7 days, persisted to `history.json`).
+Windows of 60 minutes or less return `fine`; longer windows return `bucket`.
+
+**Query Parameters:**
+- `minutes`: How far back to return samples (default 30, max 10080 = 7 days)
+
+**Response:**
+```json
+{
+  "points": [
+    { "t": 1784966650, "cpu": 10.7, "ram": 75.4, "swap": 50.2, "temp": 51.0,
+      "load": 3.05, "disk": 85.1, "power": 13.93, "net_rx": 22.6, "net_tx": 67.8 }
+  ],
+  "res": "fine",
+  "interval": 20,
+  "minutes": 30,
+  "ts": 1784966660
+}
+```
+
+Oldest first. **Branch on `res`** — `bucket` points hold `{min, avg, max}` objects rather than scalars.
+Any metric key may be absent if that sensor was unavailable for the sample.
+
+---
+
 #### PUT /api/config
 Update configuration (requires `WRITE_TOKEN`).
 
@@ -547,5 +586,5 @@ MIT — Feel free to fork, modify, and use for personal projects.
 
 ---
 
-**Last Updated**: 2026-07-21  
-**Current Version**: Batch 7 (alert / overload event log — records when a stat goes dangerously high, server-side 24/7)
+**Last Updated**: 2026-07-25  
+**Current Version**: Batch 8 (skin prototypes, expandable cards, 7-day history, downtime log)

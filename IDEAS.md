@@ -18,17 +18,26 @@ Add anything here as it comes up so it doesn't get lost.
 - [x] **PWA** (installable, offline shell, favicon) + header clock/greeting — Batch 6
 - [x] **Docker per-container stats** (CPU/MEM) — Batch 6
 - [x] **Alert / overload event log** (records when CPU/RAM/swap/temp/load/disk go dangerously high, server-side 24/7) — Batch 7
+- [x] **30-minute sparklines** backed by a server-side history ring (`/api/history`), taller + zero-anchored where it makes sense — Batch 8
+- [x] **Five selectable skins** (Bento / Ops / CRT / Paper / Classic) as live prototypes — full redesigns incl. graph form, picked from the header — Batch 8
+- [x] **Expandable stat cards** — click for the full 30m/6h/24h graph, peak/avg/min, and that metric's alerts — Batch 8
+- [x] **7-day persisted history** (5-minute min/avg/max buckets in `history.json`) — Batch 8
+- [x] **Disk fill projection** (%/day + days to 95%, least-squares over the bucket history) — Batch 8
+- [x] **Service downtime episodes** logged into the same event log as metric alerts — Batch 8
+- [x] **Sparklines for swap / load / disk + mirrored network graph** (download up, upload down) — Batch 8
 
 ## Monitoring / stats (backlog)
 
 - [ ] Top processes — highest CPU/RAM process names (psutil.process_iter)
 - [ ] GPU / ANE usage % — macmon already reports `gpu_usage`, `ecpu`/`pcpu`
 - [ ] Internet health — public IP, ping/latency to gateway, quick down/up check
-- [ ] Per-service uptime % / availability history (needs lightweight persistence)
+- [ ] Per-service uptime % / availability history — the downtime episodes are recorded now, so this is just aggregation over them
 - [ ] Disk SMART health / temperature per drive
-- [ ] Longer stat history with real charts (24h/7d) — needs a small time-series store
-- [ ] Sparklines for more metrics (network, load) + hover tooltips
-- [ ] Alert log follow-ups: web-editable thresholds, ack/clear button, per-volume disk alerts, service-downtime episodes
+- [ ] Charts over the full 7 days retained in `history.json` (the expanded view stops at 24h)
+- [ ] Sparkline hover tooltips (value + time at the cursor) — the expanded view has windows now, but no crosshair
+- [ ] Per-volume disk history (external drives), not just the internal data volume
+- [ ] Prune the skins down to the chosen one once picked (each is a contiguous block in `style.css`)
+- [ ] Alert log follow-ups: web-editable thresholds, ack/clear button, per-volume disk alerts
 
 ## Interaction / UX (backlog)
 

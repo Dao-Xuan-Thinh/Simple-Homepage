@@ -16,11 +16,13 @@ Endpoints:
     GET  /api/config                          - full project/service config (read)
     PUT  /api/config?token=<WRITE_TOKEN>      - update config (write, requires write token)
     GET  /api/alerts?limit=100                - overload event log (stats that went dangerously high)
+    GET  /api/history?minutes=30              - metric history (fine samples / 5-min buckets)
     GET  /api/logs?service=<id>&lines=50      - last N log lines
 
 CORS is pre-configured for dao-xuan-thinh.github.io and localhost.
 """
 
+import collections
 import json
 import re
 import socket
@@ -107,25 +109,71 @@ _energy_lock = threading.Lock()
 # machine was under stress even while nobody was watching a browser tab. Episodes are
 # edge-triggered with hysteresis (see alert_loop) and persisted to alerts.json.
 ALERT_INTERVAL = 20    # seconds between samples
-ALERT_MARGIN   = 5     # hysteresis: an open episode only closes below (warn - margin)
+ALERT_MARGIN   = 5     # default hysteresis; each rule can override it with "margin"
 ALERT_CONSEC   = 2     # consecutive breaching samples required before an episode opens
 ALERT_MAX      = 200   # keep at most this many episodes (oldest dropped)
 ALERTS_FILE    = os.path.join(os.path.dirname(CONFIG_FILE), "alerts.json")
 
 # metric -> rule. warn/crit are absolute thresholds, except "load" whose warn/crit are
-# multipliers against the core count (resolved per-sample). unit is display-only.
+# multipliers against the core count (resolved per-sample). `margin` is that rule's
+# hysteresis: an open episode only closes below (warn - margin), in the metric's own
+# units. unit is display-only.
+#
+# Swap is measured in absolute GB, NOT as a percentage of the swap file. macOS sizes
+# its swapfiles dynamically - it adds another when the current one fills - so
+# used/total is a sawtooth that sits in a 50-90% band by design and says nothing about
+# memory pressure. (Observed here: the same ~1.5 GB of swap read as 94% one day and
+# 50% the next, purely because the total grew from 2 GB to 3 GB.) The percentage is
+# still recorded for the graphs; it just isn't something to alert on.
 ALERT_RULES = {
-    "cpu":  {"label": "CPU",      "unit": "%",  "warn": 80,  "crit": 95},
-    "ram":  {"label": "RAM",      "unit": "%",  "warn": 85,  "crit": 95},
-    "swap": {"label": "Swap",     "unit": "%",  "warn": 40,  "crit": 75},
-    "temp": {"label": "CPU temp", "unit": "°C", "warn": 75,  "crit": 88},
-    "load": {"label": "Load",     "unit": "",   "warn": 1.0, "crit": 2.0, "per_core": True},
-    "disk": {"label": "Disk",     "unit": "%",  "warn": 85,  "crit": 95},
+    "cpu":     {"label": "CPU",      "unit": "%",   "warn": 80,  "crit": 95,  "margin": 5},
+    "ram":     {"label": "RAM",      "unit": "%",   "warn": 85,  "crit": 95,  "margin": 5},
+    "swap_gb": {"label": "Swap",     "unit": " GB", "warn": 4,   "crit": 8,   "margin": 0.75},
+    "temp":    {"label": "CPU temp", "unit": "°C",  "warn": 75,  "crit": 88,  "margin": 5},
+    "load":    {"label": "Load",     "unit": "",    "warn": 1.0, "crit": 2.0, "margin": 0.25,
+                "per_core": True},
+    "disk":    {"label": "Disk",     "unit": "%",   "warn": 85,  "crit": 95,  "margin": 5},
 }
 
 _alerts        = []    # list of episode dicts, oldest-first (active ones mutate in place)
 _alerts_active = {}    # metric -> the currently-open episode dict for that metric
 _alerts_lock   = threading.Lock()
+
+# ── Metric history (sparkline backfill) ─────────────────────────────────────────
+# The same loop that feeds the alert machine also records each sample, so the dashboard's
+# graphs show a real time window the instant a browser tab opens instead of only what that
+# tab has watched live. Two tiers:
+#
+#   fine   - every sample, in memory, ~1 h. Full resolution for the 30-minute sparklines.
+#   bucket - 5-minute min/avg/max aggregates, persisted to history.json, 7 days. Backs the
+#            expanded card views (6 h / 24 h) and the disk-usage trend projection, and
+#            survives a server restart.
+HISTORY_MAX     = 200    # fine samples kept; at ALERT_INTERVAL=20 s that's ~66 min
+BUCKET_SECONDS  = 300    # 5-minute aggregation buckets
+BUCKET_MAX      = 2016   # 7 days of 5-minute buckets
+BUCKET_FINE_MAX = 60     # /api/history windows <= this many minutes use the fine tier
+HISTORY_FILE    = os.path.join(os.path.dirname(CONFIG_FILE), "history.json")
+
+_history      = collections.deque(maxlen=HISTORY_MAX)
+_buckets      = collections.deque(maxlen=BUCKET_MAX)  # closed buckets, oldest first
+_bucket_open  = {}       # metric -> list of values in the bucket currently filling
+_bucket_start = 0        # epoch of the bucket currently filling (0 = none yet)
+_history_lock = threading.Lock()
+
+# Metrics carried through the history tiers. Superset of ALERT_RULES: power and network
+# throughput are recorded for the graphs but have no alert thresholds attached.
+HISTORY_METRICS = list(ALERT_RULES) + ["swap", "power", "net_rx", "net_tx"]
+
+# ── Service downtime episodes ───────────────────────────────────────────────────
+# refresh_statuses() already probes every service every 30 s; feeding those booleans
+# through the same episode machinery gives a record of WHEN something was down, logged
+# alongside the metric alerts in alerts.json so the dashboard has one event log.
+DOWN_CONSEC = 2  # consecutive failed checks before an outage is recorded
+
+_down_active  = {}   # service id -> the currently-open outage episode
+_down_pending = {}   # service id -> consecutive failed checks so far
+
+_net_last = None     # (epoch, bytes_recv, bytes_sent) from the previous alert-loop sample
 
 # ── Config helpers ────────────────────────────────────────────────────────────
 
@@ -278,29 +326,43 @@ def save_alerts():
 
 
 def _sample_alert_metrics():
-    """A lightweight metric snapshot for the alert loop: {cpu, ram, swap, temp, load,
-    disk}. Deliberately leaner than get_stats() (no docker/volumes/network) so the loop
-    stays cheap. Any value may be None if unavailable; the loop skips None metrics."""
-    out = {"cpu": None, "ram": None, "swap": None, "temp": None, "load": None, "disk": None}
+    """A lightweight metric snapshot for the alert loop: {cpu, ram, swap, swap_gb, temp, load,
+    disk, power, net_rx, net_tx}. Deliberately leaner than get_stats() (no docker/volumes)
+    so the loop stays cheap. Any value may be None if unavailable; the loop skips None
+    metrics. `swap` (percent), `power` and the net_* pair have no alert rules - they are
+    sampled purely to feed the history tiers; swap is alerted on as swap_gb instead."""
+    out = {"cpu": None, "ram": None, "swap": None, "swap_gb": None, "temp": None,
+           "load": None, "disk": None, "power": None, "net_rx": None, "net_tx": None}
 
     try:
         out["cpu"] = round(psutil.cpu_percent(interval=0.5), 1)
     except Exception:
         pass
 
-    # One macmon sample for temp + memory (matches get_stats); fall back to psutil.
-    mac = get_macmon()
+    # One macmon sample for temp + memory + power (matches get_stats); fall back to
+    # psutil. A 1 s window is needed for sys_power to mean anything.
+    mac = get_macmon(interval_ms=1000)
     if mac and mac.get("cpu_temp") is not None:
         out["temp"] = round(mac["cpu_temp"], 1)
+    if mac:
+        watts = mac.get("sys_power")
+        if watts is None:
+            watts = mac.get("all_power")
+        if watts is not None:
+            out["power"] = round(watts, 2)
     try:
         if mac and mac.get("ram_used") and mac.get("ram_total"):
             out["ram"] = round(mac["ram_used"] / mac["ram_total"] * 100, 1)
+            su = mac.get("swap_used") or 0
             st = mac.get("swap_total") or 0
-            out["swap"] = round((mac.get("swap_used") or 0) / st * 100, 1) if st else 0.0
+            out["swap"]    = round(su / st * 100, 1) if st else 0.0
+            out["swap_gb"] = round(su / 1024 ** 3, 2)
         else:
             vm = psutil.virtual_memory()
-            out["ram"]  = round((vm.total - vm.available) / vm.total * 100, 1)
-            out["swap"] = round(psutil.swap_memory().percent, 1)
+            sw = psutil.swap_memory()
+            out["ram"]     = round((vm.total - vm.available) / vm.total * 100, 1)
+            out["swap"]    = round(sw.percent, 1)
+            out["swap_gb"] = round(sw.used / 1024 ** 3, 2)
     except Exception:
         pass
 
@@ -315,6 +377,21 @@ def _sample_alert_metrics():
             break
         except Exception:
             continue
+
+    # Network throughput in KB/s, from the counter delta since the previous sample.
+    # The first call has no baseline, so net_rx/net_tx stay None for one interval.
+    global _net_last
+    try:
+        io  = psutil.net_io_counters()
+        now = time.time()
+        if _net_last:
+            dt = now - _net_last[0]
+            if dt > 0:
+                out["net_rx"] = round(max(0, io.bytes_recv - _net_last[1]) / dt / 1024, 1)
+                out["net_tx"] = round(max(0, io.bytes_sent - _net_last[2]) / dt / 1024, 1)
+        _net_last = (now, io.bytes_recv, io.bytes_sent)
+    except Exception:
+        pass
 
     return out
 
@@ -340,7 +417,9 @@ def _step_alerts(sample, now, cores, pending):
             mult  = cores if rule.get("per_core") else 1
             warn  = rule["warn"] * mult
             crit  = rule["crit"] * mult
-            close = warn - ALERT_MARGIN
+            # Hysteresis is per-rule and in the metric's own units — a flat margin
+            # would never let a small-scale rule (swap in GB) close again.
+            close = warn - rule.get("margin", ALERT_MARGIN) * mult
             active = _alerts_active.get(metric)
 
             if active is not None:
@@ -360,6 +439,7 @@ def _step_alerts(sample, now, cores, pending):
                     pending[metric] = 0
                     ep = {
                         "id":         now * 100 + _ALERT_METRICS.index(metric),
+                        "kind":       "metric",
                         "metric":     metric,
                         "label":      rule["label"],
                         "unit":       rule["unit"],
@@ -380,10 +460,138 @@ def _step_alerts(sample, now, cores, pending):
     return changed
 
 
+def _step_downtime(services, now):
+    """Advance the service-outage state machine by one status refresh. Mirrors
+    _step_alerts, but the input is a boolean (reachable / not) rather than a threshold:
+      - opens an outage after DOWN_CONSEC consecutive failed checks
+      - closes it on the first successful check
+    Outages land in the same _alerts list as the metric episodes - one event log, one
+    file, one endpoint - tagged with kind="service". Returns True if anything changed."""
+    changed = False
+    with _alerts_lock:
+        for svc in services:
+            sid = svc.get("id")
+            if not sid:
+                continue
+            active = _down_active.get(sid)
+
+            if svc.get("online"):
+                _down_pending[sid] = 0
+                if active is not None:
+                    active["ended_at"] = now
+                    _down_active.pop(sid, None)
+                    changed = True
+            elif active is not None:
+                active["updated_at"] = now
+                changed = True
+            else:
+                _down_pending[sid] = _down_pending.get(sid, 0) + 1
+                if _down_pending[sid] >= DOWN_CONSEC:
+                    _down_pending[sid] = 0
+                    # 90+ namespace keeps service ids clear of the metric ones (which use
+                    # the metric's index); bump on collision if two drop in one second.
+                    eid = now * 100 + 90
+                    while any(e["id"] == eid for e in _alerts[-20:]):
+                        eid += 1
+                    ep = {
+                        "id":         eid,
+                        "kind":       "service",
+                        "metric":     sid,
+                        "label":      svc.get("name", sid),
+                        "unit":       "",
+                        "level":      "critical",
+                        "started_at": now,
+                        "updated_at": now,
+                        "ended_at":   None,
+                    }
+                    _alerts.append(ep)
+                    _down_active[sid] = ep
+                    if len(_alerts) > ALERT_MAX:
+                        del _alerts[:len(_alerts) - ALERT_MAX]
+                    changed = True
+    return changed
+
+
+def load_history():
+    """Load persisted 5-minute buckets. Never raises - a missing or corrupt file just
+    means the long-window graphs start empty and refill as samples arrive."""
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        buckets = data.get("buckets", [])
+        cutoff = int(time.time()) - BUCKET_MAX * BUCKET_SECONDS
+        with _history_lock:
+            _buckets.clear()
+            _buckets.extend(b for b in buckets if isinstance(b, dict) and b.get("t", 0) >= cutoff)
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        print(f"[history] Failed to load {HISTORY_FILE}: {exc}")
+
+
+def save_history():
+    """Atomically persist the closed buckets. Called once per closed bucket (every 5 min),
+    not per sample, so this stays cheap."""
+    with _history_lock:
+        data = {"buckets": list(_buckets), "bucket_seconds": BUCKET_SECONDS}
+    tmp = HISTORY_FILE + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, separators=(",", ":"))
+        os.replace(tmp, HISTORY_FILE)
+    except Exception as exc:
+        print(f"[history] Failed to save {HISTORY_FILE}: {exc}")
+
+
+def _close_bucket():
+    """Fold the values accumulated in the open bucket into a min/avg/max aggregate and
+    move it into the ring. Caller must hold _history_lock. Returns True if one was
+    appended (i.e. there is something new worth persisting)."""
+    global _bucket_start
+    if not _bucket_open or not _bucket_start:
+        return False
+    agg = {"t": _bucket_start}
+    for metric, vals in _bucket_open.items():
+        if vals:
+            agg[metric] = {
+                "min": round(min(vals), 2),
+                "avg": round(sum(vals) / len(vals), 2),
+                "max": round(max(vals), 2),
+            }
+    _bucket_open.clear()
+    if len(agg) > 1:            # more than just the timestamp
+        _buckets.append(agg)
+        return True
+    return False
+
+
+def _history_push(sample, now):
+    """Record one sample in both tiers. Returns True when a bucket just closed (the
+    caller then persists). Buckets are aligned to wall-clock BUCKET_SECONDS boundaries so
+    they line up across restarts."""
+    global _bucket_start
+    point = {"t": now}
+    point.update({k: v for k, v in sample.items() if v is not None})
+    slot = now - (now % BUCKET_SECONDS)
+    with _history_lock:
+        _history.append(point)
+        closed = False
+        if _bucket_start and slot != _bucket_start:
+            closed = _close_bucket()
+        _bucket_start = slot
+        for metric in HISTORY_METRICS:
+            val = sample.get(metric)
+            if val is not None:
+                _bucket_open.setdefault(metric, []).append(val)
+    return closed
+
+
 def alert_loop():
-    """Background thread: every ALERT_INTERVAL seconds, sample metrics and feed them to
-    _step_alerts, persisting to alerts.json whenever the event log changes."""
-    load_alerts()
+    """Background thread: every ALERT_INTERVAL seconds, sample metrics, feed them to
+    _step_alerts (persisting to alerts.json whenever the event log changes) and record
+    them in the history tiers that back the dashboard graphs. Persisted state is loaded in
+    main() before any thread starts - load_alerts() clears the list, so it must not race
+    the status loop, which appends downtime episodes to the same list."""
     pending = {m: 0 for m in ALERT_RULES}
     cores = psutil.cpu_count() or 1
     while True:
@@ -393,7 +601,10 @@ def alert_loop():
         except Exception as exc:
             print(f"[alerts] sample error: {exc}")
             continue
-        if _step_alerts(sample, int(time.time()), cores, pending):
+        now = int(time.time())
+        if _history_push(sample, now):   # a 5-minute bucket just closed
+            save_history()
+        if _step_alerts(sample, now, cores, pending):
             save_alerts()
 
 
@@ -486,6 +697,11 @@ def refresh_statuses():
         _status_cache["services"]  = svc_results
         _status_cache["projects"]  = proj_results
         _status_cache["ts"]        = int(time.time())
+
+    # Feed the same results through the outage machine so downtime is logged alongside
+    # the metric alerts.
+    if _step_downtime(svc_results, int(time.time())):
+        save_alerts()
 
 
 def status_refresh_loop():
@@ -1042,6 +1258,29 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 json_response(self, {"error": str(e)}, 500)
 
+        elif path == "/api/history":
+            try:
+                minutes = int(qs.get("minutes", ["30"])[0])
+                minutes = max(1, min(minutes, BUCKET_MAX * BUCKET_SECONDS // 60))
+                cutoff = int(time.time()) - minutes * 60
+                # Short windows get full-resolution samples; longer ones get the
+                # persisted 5-minute min/avg/max buckets, which have a different point
+                # shape - hence "res" so the client knows what it is drawing.
+                if minutes <= BUCKET_FINE_MAX:
+                    with _history_lock:
+                        points = [p for p in _history if p["t"] >= cutoff]
+                    res, interval = "fine", ALERT_INTERVAL
+                else:
+                    with _history_lock:
+                        points = [b for b in _buckets if b["t"] >= cutoff]
+                    res, interval = "bucket", BUCKET_SECONDS
+                json_response(self, {
+                    "points": points, "res": res, "interval": interval,
+                    "minutes": minutes, "ts": int(time.time()),
+                })
+            except Exception as e:
+                json_response(self, {"error": str(e)}, 500)
+
         elif path == "/api/logs":
             service = qs.get("service", ["immich"])[0]
             container = qs.get("container", [None])[0]
@@ -1109,6 +1348,10 @@ if __name__ == "__main__":
     print(f"  Public URL (via Tailscale Funnel on :{FUNNEL_PORT}):")
     print(f"  https://{TAILSCALE_HOSTNAME}:{FUNNEL_PORT}/api/stats?token={API_TOKEN}")
     print("Press Ctrl+C to stop.")
+
+    # Restore persisted event log + metric history before any thread can touch them.
+    load_alerts()
+    load_history()
 
     # Initial status check + background refresh loop
     print("[status] Running initial status check...")

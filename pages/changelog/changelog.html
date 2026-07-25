@@ -68,8 +68,46 @@
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <div class="entry">
       <div class="entry-header">
-        <span class="entry-title">Batch 7 — Alert / overload event log</span>
+        <span class="entry-title">Batch 8 — Skins, expandable cards, 7-day history</span>
         <span class="badge badge-latest">Latest</span>
+        <span class="entry-date">2026-07-25</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-ui">ui</span><strong>Five selectable skins</strong> — <strong>Bento</strong> (asymmetric tile wall, hero panels), <strong>Ops</strong> (monitoring rig, titled panels over ruled plot areas), <strong>CRT</strong> (amber phosphor terminal with scanlines), <strong>Paper</strong> (editorial print, serif and hairlines) and <strong>Classic</strong>. From the <code>◐</code> button in the header or the command palette; each has light and dark and the choice sticks across reloads. They're prototypes: pick one and the rest get deleted</li>
+        <li><span class="tag tag-ui">ui</span>Skins change the <strong>form the graphs take</strong>, not just their colour — filled area, bare stroke, discrete columns, or block characters rendered as text. Switching skin redraws every chart</li>
+        <li><span class="tag tag-ui">ui</span>Density, radius, borders, sheen and typography moved out of the component rules into CSS variables, so each skin layers its structural redesign on a shared token base instead of forking the stylesheet</li>
+        <li><span class="tag tag-feat">feat</span><strong>Click any stat card</strong> for the full graph over 30m / 6h / 24h, with current/peak/avg/min, live detail, and the alerts recorded in that window. Keyboard-reachable (Tab, then Enter)</li>
+        <li><span class="tag tag-feat">feat</span>History is now <strong>persisted for 7 days</strong> as 5-minute min/avg/max buckets in <code>history.json</code>, so the long windows survive a server restart. The bucketed charts draw the min–max band behind the average</li>
+        <li><span class="tag tag-feat">feat</span><strong>Disk fill projection</strong> — a least-squares fit over the history gives percent-per-day drift and an estimate of when the volume hits 95%. Says "collecting" rather than inventing a number under a day of data</li>
+        <li><span class="tag tag-feat">feat</span><strong>Service outages are logged</strong> alongside the metric alerts — the 30 s health probe feeds the same episode machinery, opening after 2 consecutive failed checks and closing on recovery</li>
+        <li><span class="tag tag-feat">feat</span>Sparklines added for <strong>swap, load and disk</strong>, plus a <strong>mirrored network graph</strong> — download above the baseline, upload below, on a shared scale</li>
+        <li><span class="tag tag-api">api</span><code>GET /api/history</code> serves two tiers and reports which via <code>res</code>: fine ~20 s samples for windows up to an hour, 5-minute buckets beyond. Network throughput (<code>net_rx</code>/<code>net_tx</code>) added to the sample</li>
+        <li><span class="tag tag-fix">fix</span><strong>Swap now alerts on absolute GB, not percentage.</strong> macOS resizes its swapfiles on demand, so <code>used/total</code> is a sawtooth that sits in a 50–90% band by design — the same ~1.5 GB of swap read as 94% one day and 50% the next, purely because the total grew from 2 GB to 3 GB. It had fired six false criticals. Now <code>swap_gb</code>, warn 4 GB / crit 8 GB; the percentage is still graphed</li>
+        <li><span class="tag tag-fix">fix</span>Alert hysteresis is <strong>per-rule and in the metric's own units</strong>. The old flat margin of 5 would have given a 4 GB threshold a close point of −1, so a swap episode could never have cleared</li>
+        <li><span class="tag tag-fix">fix</span>Persisted state is loaded before the background threads start — <code>load_alerts()</code> clears the list, which could have wiped an outage recorded by the status loop in the first seconds after boot</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Batch 7.5 — 30-minute sparklines</span>
+        <span class="entry-date">2026-07-25</span>
+      </div>
+      <ul class="changes">
+        <li><span class="tag tag-feat">feat</span>Sparklines now cover a <strong>30-minute window</strong> instead of ~5 minutes of whatever the open tab happened to watch</li>
+        <li><span class="tag tag-api">api</span>New <code>GET /api/history</code> — the alert loop's samples are kept in a server-side ring, so the graphs are <strong>already populated</strong> the moment the page loads</li>
+        <li><span class="tag tag-ui">ui</span>Graphs are <strong>twice as tall</strong> with a crisp hairline trace and a baseline rule; CPU and power are anchored at zero so spikes read as spikes, RAM and temperature zoom to their active band</li>
+        <li><span class="tag tag-ui">ui</span>Each graph labels its <strong>peak</strong> and the time span it covers</li>
+        <li><span class="tag tag-fix">fix</span>The x axis is real time, so the server's 20 s samples and the browser's 5 s samples share a series without distorting the shape; coming back to a backgrounded tab re-seeds from the server instead of drawing a flat line across the gap</li>
+        <li><span class="tag tag-fix">fix</span>Replaced undefined <code>--border</code> / <code>--muted</code> CSS variables in the settings log editor with the real tokens</li>
+      </ul>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry">
+      <div class="entry-header">
+        <span class="entry-title">Batch 7 — Alert / overload event log</span>
         <span class="entry-date">2026-07-21</span>
       </div>
       <ul class="changes">

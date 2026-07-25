@@ -19,6 +19,29 @@
   --radius-sm: 8px;
   --transition: 0.25s ease;
 
+  /* ── Skin tokens ──────────────────────────────────────────────────────────
+     Shape, density and typography, pulled out of the component rules so a skin
+     is a block that reassigns these rather than a parallel stylesheet. Values
+     here are the "classic" skin; body[data-skin] blocks near the end of this
+     file override them. Components must read these tokens, never literals —
+     that's what lets new UI inherit every skin for free. */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --card-pad: 1.1rem 1.2rem;
+  --grid-gap: 1rem;
+  --card-min: 220px;
+  --stat-min: 180px;
+  --border-w: 1px;
+  --card-sheen: linear-gradient(180deg, color-mix(in srgb, var(--text) 3%, transparent), transparent 40%);
+  --stripe-h: 3px;
+  --label-transform: uppercase;
+  --label-spacing: 0.07em;
+  --label-weight: 600;
+  --value-size: 1.7rem;
+  --value-glow: 0 0 22px color-mix(in srgb, var(--m, var(--accent)) 28%, transparent);
+  --card-lift: -3px;
+  --card-blur: none;
+  --pill: 20px;
+
   /* Per-metric accent colors (validated: CVD-distinguishable, contrast-safe).
      Each stat card carries data-metric to pick its stripe / value / bar color. */
   --m-cpu:    #5b8dee;
@@ -67,7 +90,7 @@ body.dark {
 html { scroll-behavior: smooth; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-ui);
   background: var(--bg);
   background-image: var(--bg-grad);
   background-attachment: fixed;
@@ -181,8 +204,8 @@ main {
   font-size: 0.9rem;
   font-weight: 700;
   color: var(--text);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  text-transform: var(--label-transform);
+  letter-spacing: calc(var(--label-spacing) * 1.4);
   margin-bottom: 1rem;
   display: flex;
   align-items: center;
@@ -216,7 +239,7 @@ main {
   font-size: 0.65rem;
   font-weight: 600;
   padding: 2px 7px;
-  border-radius: 20px;
+  border-radius: var(--pill);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -239,18 +262,18 @@ main {
 /* ── Card Grid ─────────────────────────────────────────────────── */
 .cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: var(--grid-gap);
 }
 
 /* ── Base Card ─────────────────────────────────────────────────── */
 .card {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--text) 3%, transparent), transparent 40%),
-    var(--card-bg);
-  border: 1px solid var(--card-border);
+  background-color: var(--card-bg);
+  background-image: var(--card-sheen);
+  backdrop-filter: var(--card-blur);
+  border: var(--border-w) solid var(--card-border);
   border-radius: var(--radius);
-  padding: 1.1rem 1.2rem;
+  padding: var(--card-pad);
   box-shadow: var(--shadow);
   transition: background var(--transition), border-color var(--transition),
               transform 0.18s, box-shadow 0.18s;
@@ -265,7 +288,7 @@ main {
   position: relative;
 }
 .project-card:hover {
-  transform: translateY(-3px);
+  transform: translateY(var(--card-lift));
   box-shadow: 0 6px 24px rgba(0,0,0,0.12);
   border-color: var(--accent);
 }
@@ -299,7 +322,7 @@ body.dark .project-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
   gap: 0.7rem;
 }
 .download-card:hover {
-  transform: translateY(-3px);
+  transform: translateY(var(--card-lift));
   box-shadow: 0 6px 24px rgba(0,0,0,0.12);
   border-color: var(--accent);
 }
@@ -369,7 +392,7 @@ body.dark .download-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
 .status-dot.offline { background: var(--offline); box-shadow: 0 0 6px var(--offline); }
 
 /* ── Stat Card ─────────────────────────────────────────────────── */
-.stats-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.stats-grid { grid-template-columns: repeat(auto-fill, minmax(var(--stat-min), 1fr)); }
 
 .stat-card {
   display: flex;
@@ -385,7 +408,7 @@ body.dark .download-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
   content: '';
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 3px;
+  height: var(--stripe-h);
   background: var(--m);
   opacity: 0.9;
 }
@@ -404,24 +427,24 @@ body.dark .download-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
 
 .stat-label {
   font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
+  font-weight: var(--label-weight);
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-spacing);
   color: var(--text-muted);
 }
 
 .stat-value {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 1.7rem;
+  font-size: var(--value-size);
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--m);
   line-height: 1.05;
-  text-shadow: 0 0 22px color-mix(in srgb, var(--m) 28%, transparent);
+  text-shadow: var(--value-glow);
 }
 
-.stat-value.uptime { font-size: 1.05rem; letter-spacing: 0; }
+.stat-value.uptime { font-size: calc(var(--value-size) * 0.62); letter-spacing: 0; }
 
 .stat-sub {
   font-size: 0.73rem;
@@ -519,7 +542,7 @@ body.dark .download-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
   font-size: 0.72rem;
   font-weight: 600;
   padding: 3px 9px;
-  border-radius: 20px;
+  border-radius: var(--pill);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -644,7 +667,7 @@ body.dark .download-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 1px 6px;
-  border-radius: 20px;
+  border-radius: var(--pill);
 }
 .al-level.warning  { color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
 .al-level.critical { color: var(--offline); background: color-mix(in srgb, var(--offline) 16%, transparent); }
@@ -1009,13 +1032,13 @@ footer a:hover { text-decoration: underline; }
 
 .tab-hint {
   font-size: 0.82rem;
-  color: var(--muted);
+  color: var(--text-muted);
   margin-bottom: 0.75rem;
 }
 
 .log-svc-section {
   margin-bottom: 1rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--card-border);
   border-radius: var(--radius-sm);
   overflow: hidden;
 }
@@ -1025,10 +1048,10 @@ footer a:hover { text-decoration: underline; }
   padding: 0.4rem 0.7rem;
   font-size: 0.82rem;
   font-weight: 700;
-  color: var(--muted);
+  color: var(--text-muted);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--card-border);
 }
 
 .log-containers-list {
@@ -1049,7 +1072,7 @@ footer a:hover { text-decoration: underline; }
   min-width: 0;
   padding: 0.3rem 0.55rem;
   font-size: 0.82rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--card-border);
   border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
@@ -1085,21 +1108,60 @@ footer a:hover { text-decoration: underline; }
 /* ── Sparklines ────────────────────────────────────────────────── */
 .spark {
   display: block;
+  position: relative;
   width: 100%;
-  height: 26px;
-  margin-top: 0.15rem;
+  height: 52px;
+  margin-top: 0.45rem;
+  /* Baseline rule the trace sits on, like a throughput graph's zero line. */
+  border-bottom: 1px solid var(--card-border);
 }
-.spark svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.spark svg { width: 100%; height: 100%; display: block; }
 .spark polyline.spark-line {
   fill: none;
   stroke: var(--m, var(--accent));
-  stroke-width: 1.5;
-  stroke-linejoin: round;
-  stroke-linecap: round;
+  /* Hairline, mitred, non-scaling: the viewBox is stretched non-uniformly, so the
+     stroke has to opt out of that transform to stay crisp and keep spikes pointed. */
+  stroke-width: 1;
+  stroke-linejoin: miter;
+  stroke-linecap: butt;
+  shape-rendering: geometricPrecision;
+}
+/* Chart forms other than the default area (see drawSpark in app.js). */
+.spark rect.spark-bar { fill: var(--m, var(--accent)); }
+.spark .spark-blocks {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1;
+  color: var(--m, var(--accent));
+  white-space: nowrap;
+  overflow: hidden;
 }
 .spark polygon.spark-area {
-  fill: color-mix(in srgb, var(--m, var(--accent)) 14%, transparent);
+  fill: color-mix(in srgb, var(--m, var(--accent)) 16%, transparent);
   stroke: none;
+}
+/* Peak within the window (top-left) and how much time the window covers (bottom-right). */
+.spark-peak,
+.spark-span {
+  position: absolute;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+.spark-peak {
+  top: 1px;
+  left: 0;
+  color: var(--m, var(--accent));
+  opacity: 0.85;
+}
+.spark-span {
+  bottom: 3px;
+  right: 0;
+  color: var(--text-muted);
+  opacity: 0.7;
 }
 
 /* ── Tailscale devices ─────────────────────────────────────────── */
@@ -1264,3 +1326,615 @@ kbd {
   padding: 0 4px;
 }
 
+
+/* ═════════════════════════════════════════════════════════════════
+   SKINS — whole-design prototypes
+   ─────────────────────────────────────────────────────────────────
+   Not palette swaps. Each skin restructures the page: grid shape,
+   card framing, typography, and (via drawSpark in app.js) the form
+   the graphs take — filled area, bare stroke, columns, or block
+   characters rendered as text.
+
+   Each block is self-contained: once one is chosen, deleting the
+   others is a clean cut. `classic` lives in :root and has no block.
+   ═════════════════════════════════════════════════════════════════ */
+
+/* ═══ BENTO ═══════════════════════════════════════════════════════
+   Asymmetric tile wall. No borders — tiles float on tinted surfaces
+   and are separated by space alone. CPU and RAM get hero tiles twice
+   the size of the rest, so the grid reads as a composition rather
+   than a uniform table. Big, soft, rounded, quiet. */
+body[data-skin="bento"] {
+  --font-ui: ui-rounded, -apple-system, 'SF Pro Rounded', 'Segoe UI', sans-serif;
+  --radius: 22px;
+  --radius-sm: 14px;
+  --pill: 999px;
+  --border-w: 0px;
+  --card-pad: 1.3rem 1.4rem;
+  --grid-gap: 0.75rem;
+  --card-sheen: none;
+  --stripe-h: 0px;
+  --value-size: 2.1rem;
+  --value-glow: none;
+  --card-lift: 0px;
+  --label-transform: none;
+  --label-spacing: 0;
+  --label-weight: 500;
+
+  --bg: #f0f0f3;
+  --bg-grad: none;
+  --bg-alt: #e6e6ea;
+  --card-bg: #ffffff;
+  --card-border: transparent;
+  --text: #16161a;
+  --text-muted: #86868b;
+  --shadow: none;
+}
+body[data-skin="bento"].dark {
+  --bg: #000000;
+  --bg-grad: none;
+  --bg-alt: #1c1c1e;
+  --card-bg: #141416;
+  --text: #f5f5f7;
+  --text-muted: #86868b;
+}
+/* Fixed 4-column wall so tiles can span deliberately. */
+body[data-skin="bento"] .stats-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(120px, auto);
+}
+body[data-skin="bento"] .stat-card[data-expand="cpu"],
+body[data-skin="bento"] .stat-card[data-expand="ram"] {
+  grid-column: span 2;
+  grid-row: span 2;
+  justify-content: space-between;
+}
+/* Hero tiles get an outsized number and a full-bleed graph at the foot. */
+body[data-skin="bento"] .stat-card[data-expand="cpu"] .stat-value,
+body[data-skin="bento"] .stat-card[data-expand="ram"] .stat-value { font-size: 4rem; font-weight: 600; }
+body[data-skin="bento"] .stat-card[data-expand="cpu"] .spark,
+body[data-skin="bento"] .stat-card[data-expand="ram"] .spark { height: 110px; }
+body[data-skin="bento"] .stat-card[data-expand="net"] { grid-column: span 2; }
+body[data-skin="bento"] .volumes-card { grid-column: 1 / -1; }
+body[data-skin="bento"] .stat-value { font-family: var(--font-ui); letter-spacing: -0.03em; }
+body[data-skin="bento"] .stat-bar-wrap { height: 8px; border-radius: 99px; }
+body[data-skin="bento"] .stat-bar { border-radius: 99px; box-shadow: none; }
+body[data-skin="bento"] .spark { border-bottom: none; }
+body[data-skin="bento"] .spark-area { fill: color-mix(in srgb, var(--m, var(--accent)) 22%, transparent); }
+body[data-skin="bento"] .spark-line { stroke-width: 2; stroke-linejoin: round; }
+body[data-skin="bento"] .cards-grid { --card-min: 260px; }
+body[data-skin="bento"] .section-title { font-size: 1.4rem; font-weight: 600; letter-spacing: -0.02em; }
+body[data-skin="bento"] .section-icon { display: none; }
+body[data-skin="bento"] header { background: var(--bg); border-bottom: none; box-shadow: none; }
+body[data-skin="bento"] .card { transition: transform 0.2s; }
+body[data-skin="bento"] .card:hover { transform: scale(1.015); }
+body[data-skin="bento"] main { gap: 3rem; }
+@media (max-width: 700px) {
+  body[data-skin="bento"] .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+
+/* ═══ OPS ═════════════════════════════════════════════════════════
+   A monitoring rig. Every card becomes a panel with its own title
+   bar; the label moves into that bar and the body holds the reading.
+   Charts are discrete columns on a ruled plot area. Dense, cool,
+   deliberately utilitarian. */
+body[data-skin="ops"] {
+  --font-ui: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --radius: 3px;
+  --radius-sm: 2px;
+  --pill: 2px;
+  --border-w: 1px;
+  --card-pad: 0;
+  --grid-gap: 0.4rem;
+  --card-min: 200px;
+  --stat-min: 172px;
+  --card-sheen: none;
+  --stripe-h: 0px;
+  --value-size: 1.6rem;
+  --value-glow: none;
+  --card-lift: 0px;
+  --label-transform: uppercase;
+  --label-spacing: 0.08em;
+  --label-weight: 600;
+
+  --bg: #eef0f4;
+  --bg-grad: none;
+  --bg-alt: #e2e6ec;
+  --card-bg: #ffffff;
+  --card-border: #c8cfda;
+  --text: #10151c;
+  --text-muted: #5c6773;
+  --accent: #2b7de9;
+  --shadow: none;
+}
+body[data-skin="ops"].dark {
+  --bg: #0b0f14;
+  --bg-grad: none;
+  --bg-alt: #141a22;
+  --card-bg: #111720;
+  --card-border: #232c38;
+  --text: #d8e0ea;
+  --text-muted: #7c8899;
+  --accent: #4d9bf5;
+}
+/* Panel chrome: the label is promoted into a title bar strip. */
+body[data-skin="ops"] .stat-card { gap: 0; overflow: hidden; }
+body[data-skin="ops"] .stat-label {
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--card-border);
+  padding: 0.32rem 0.6rem;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+/* The metric colour becomes a marker on the title bar rather than a top stripe. */
+body[data-skin="ops"] .stat-label::before {
+  content: '';
+  display: inline-block;
+  width: 6px; height: 6px;
+  margin-right: 0.45rem;
+  background: var(--m, var(--accent));
+  vertical-align: middle;
+}
+body[data-skin="ops"] .stat-value,
+body[data-skin="ops"] .stat-sub,
+body[data-skin="ops"] .stat-bar-wrap,
+body[data-skin="ops"] .volumes-list { margin: 0 0.6rem; }
+body[data-skin="ops"] .stat-value { margin-top: 0.5rem; color: var(--text); }
+body[data-skin="ops"] .stat-sub { font-size: 0.68rem; margin-bottom: 0.5rem; }
+body[data-skin="ops"] .stat-bar-wrap { height: 3px; border-radius: 0; }
+body[data-skin="ops"] .stat-bar { border-radius: 0; box-shadow: none; }
+/* Ruled plot area, like a real chart panel. */
+body[data-skin="ops"] .spark {
+  height: 60px;
+  margin: 0.4rem 0 0;
+  border-top: 1px solid var(--card-border);
+  border-bottom: none;
+  background-image:
+    repeating-linear-gradient(to top, var(--card-border) 0 1px, transparent 1px 25%),
+    repeating-linear-gradient(to right, var(--card-border) 0 1px, transparent 1px 12.5%);
+  background-size: 100% 100%;
+  opacity: 1;
+}
+body[data-skin="ops"] .spark-bar { fill: var(--m, var(--accent)); }
+body[data-skin="ops"] .spark-peak,
+body[data-skin="ops"] .spark-span { font-size: 0.56rem; padding: 0 2px; background: var(--card-bg); }
+body[data-skin="ops"] .section-title { font-size: 0.7rem; margin-bottom: 0.5rem; }
+body[data-skin="ops"] main { gap: 1.5rem; }
+body[data-skin="ops"] .card:hover { box-shadow: none; border-color: var(--accent); }
+
+
+/* ═══ CRT ═════════════════════════════════════════════════════════
+   Amber phosphor terminal. Everything is monospace and glowing on
+   near-black; cards are drawn as ASCII-style frames; the graphs stop
+   being vectors entirely and become block characters (see drawSpark).
+   A scanline overlay sits above the whole page. */
+body[data-skin="crt"] {
+  --font-ui: var(--mono);
+  --radius: 0px;
+  --radius-sm: 0px;
+  --pill: 0px;
+  --border-w: 1px;
+  --card-pad: 0.6rem 0.8rem;
+  --grid-gap: 0.5rem;
+  --card-min: 240px;
+  --stat-min: 210px;
+  --card-sheen: none;
+  --stripe-h: 0px;
+  --value-size: 1.5rem;
+  --card-lift: 0px;
+  --label-transform: uppercase;
+  --label-spacing: 0.14em;
+  --label-weight: 400;
+
+  --bg: #0a0700;
+  --bg-grad: none;
+  --bg-alt: #140d00;
+  --card-bg: #0d0900;
+  --card-border: #6b4a00;
+  --text: #ffb642;
+  --text-muted: #a3722a;
+  --accent: #ffb642;
+  --online: #7dff5c;
+  --warning: #ffd23f;
+  --offline: #ff5f4d;
+  --bar-bg: #2a1c00;
+  --shadow: none;
+  --value-glow: 0 0 8px currentColor;
+  /* Every metric burns the same phosphor — colour is not available as a
+     channel on a monochrome tube, so hierarchy comes from brightness. */
+  --m-cpu: #ffb642;   --m-load: #ffb642;  --m-ram: #ffb642;
+  --m-swap: #ffb642;  --m-temp: #ffb642;  --m-power: #ffb642;
+  --m-disk: #ffb642;  --m-net: #ffb642;   --m-docker: #ffb642;
+  --m-uptime: #ffb642;
+}
+/* Light mode = the same tube with the brightness turned up on a paper-white
+   phosphor, rather than a different design. */
+body[data-skin="crt"]:not(.dark) {
+  --bg: #efe6d2;
+  --bg-alt: #e4d8bd;
+  --card-bg: #f5eeddff;
+  --card-border: #8a7038;
+  --text: #2e2000;
+  --text-muted: #6d5410;
+  --accent: #7a4b00;
+  --value-glow: none;
+  --m-cpu: #7a4b00;   --m-load: #7a4b00;  --m-ram: #7a4b00;
+  --m-swap: #7a4b00;  --m-temp: #7a4b00;  --m-power: #7a4b00;
+  --m-disk: #7a4b00;  --m-net: #7a4b00;   --m-docker: #7a4b00;
+  --m-uptime: #7a4b00;
+}
+body[data-skin="crt"] .stat-value { text-shadow: var(--value-glow); }
+body[data-skin="crt"] .card { position: relative; }
+/* ASCII frame corners. */
+body[data-skin="crt"] .stat-card .stat-label::before { content: '┌─ '; color: var(--card-border); }
+body[data-skin="crt"] .stat-card .stat-label::after  { content: ' ─┐'; color: var(--card-border); }
+body[data-skin="crt"] .section-title::before { content: '>> '; }
+body[data-skin="crt"] .section-icon { display: none; }
+/* Graphs are text: sized and spaced as glyphs, not as a box. */
+body[data-skin="crt"] .spark {
+  height: auto;
+  border-bottom: none;
+  margin-top: 0.4rem;
+  overflow: hidden;
+}
+body[data-skin="crt"] .spark-blocks {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1;
+  letter-spacing: -0.5px;
+  color: var(--accent);
+  text-shadow: var(--value-glow);
+  white-space: nowrap;
+  overflow: hidden;
+}
+body[data-skin="crt"] .spark-peak,
+body[data-skin="crt"] .spark-span { position: static; display: inline; font-size: 0.62rem; opacity: 0.75; }
+body[data-skin="crt"] .spark-span::before { content: ' / '; }
+/* Scanlines + vignette over everything. */
+body[data-skin="crt"]::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom, rgba(0,0,0,0.16) 0 1px, transparent 1px 3px);
+}
+body[data-skin="crt"]:not(.dark)::after { background: repeating-linear-gradient(
+    to bottom, rgba(90,60,0,0.07) 0 1px, transparent 1px 3px); }
+body[data-skin="crt"] header { background: var(--bg); box-shadow: none; }
+body[data-skin="crt"] header::after { display: none; }
+body[data-skin="crt"] .badge { border-radius: 0; }
+body[data-skin="crt"] .stat-bar-wrap { border-radius: 0; height: 8px; }
+body[data-skin="crt"] .stat-bar { border-radius: 0; box-shadow: none; }
+
+
+/* ═══ PAPER ═══════════════════════════════════════════════════════
+   Editorial print. Light-first, serif headings, no boxes at all —
+   sections are separated by hairline rules and whitespace. Numbers
+   are set large and light like a magazine data page, and the graphs
+   are bare strokes with no fill. */
+body[data-skin="paper"] {
+  --font-ui: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --radius: 0px;
+  --radius-sm: 0px;
+  --pill: 0px;
+  --border-w: 0px;
+  --card-pad: 0 1.4rem 1.4rem 0;
+  --grid-gap: 2.2rem;
+  --card-min: 240px;
+  --stat-min: 200px;
+  --card-sheen: none;
+  --stripe-h: 0px;
+  --value-size: 2.6rem;
+  --value-glow: none;
+  --card-lift: 0px;
+  --label-transform: uppercase;
+  --label-spacing: 0.16em;
+  --label-weight: 600;
+
+  --bg: #f7f4ed;
+  --bg-grad: none;
+  --bg-alt: #efeae0;
+  --card-bg: transparent;
+  --card-border: #cfc7b6;
+  --text: #1c1a16;
+  --text-muted: #7a7466;
+  --accent: #8c2f24;
+  --shadow: none;
+}
+body[data-skin="paper"].dark {
+  --bg: #16150f;
+  --bg-alt: #1e1d16;
+  --card-bg: transparent;
+  --card-border: #3d3a2e;
+  --text: #ece7da;
+  --text-muted: #9a9384;
+  --accent: #e0705f;
+}
+/* No cards: a hairline above each entry does the separating. */
+body[data-skin="paper"] .card {
+  border-top: 1px solid var(--card-border);
+  padding-top: 0.9rem;
+  background: none;
+}
+body[data-skin="paper"] .stat-label { font-family: var(--mono); font-size: 0.6rem; }
+body[data-skin="paper"] .stat-value {
+  font-family: var(--font-ui);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+body[data-skin="paper"] .stat-sub { font-size: 0.78rem; font-style: italic; }
+body[data-skin="paper"] .stat-bar-wrap { height: 2px; border-radius: 0; background: var(--card-border); }
+body[data-skin="paper"] .stat-bar { border-radius: 0; box-shadow: none; background: var(--text); }
+body[data-skin="paper"] .spark { height: 46px; border-bottom: none; }
+body[data-skin="paper"] .spark-line { stroke: var(--text); stroke-width: 1; }
+body[data-skin="paper"] .spark-peak { color: var(--text-muted); font-family: var(--mono); }
+body[data-skin="paper"] .section-title {
+  font-family: var(--font-ui);
+  font-size: 1.6rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  border-bottom: 2px solid var(--text);
+  padding-bottom: 0.4rem;
+}
+body[data-skin="paper"] .section-icon { display: none; }
+body[data-skin="paper"] header {
+  background: var(--bg);
+  border-bottom: 2px solid var(--text);
+  box-shadow: none;
+}
+body[data-skin="paper"] header::after { display: none; }
+body[data-skin="paper"] .brand h1 { font-family: var(--font-ui); font-weight: 400; font-size: 1.5rem; }
+body[data-skin="paper"] main { gap: 3.2rem; }
+body[data-skin="paper"] .badge { border-radius: 0; font-family: var(--mono); }
+body[data-skin="paper"] .card:hover { box-shadow: none; }
+
+
+/* ── Skin picker ──────────────────────────────────────────────────
+   Lives in the header next to the theme toggle. Swatch colours are
+   literal here on purpose: each swatch must show *its own* skin's
+   palette, not the one currently applied. */
+.skin-wrap { position: relative; }
+
+#skin-btn {
+  background: var(--bg-alt);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  width: 38px;
+  height: 38px;
+  cursor: pointer;
+  font-size: 1.05rem;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition), border-color var(--transition), transform 0.15s;
+}
+#skin-btn:hover { background: var(--card-border); transform: scale(1.08); }
+
+.skin-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 200;
+  width: 268px;
+  padding: 4px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.skin-menu[hidden] { display: none; }
+
+.skin-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.5rem 0.55rem;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font-family: inherit;
+  transition: background var(--transition);
+}
+.skin-opt:hover { background: var(--bg-alt); }
+.skin-opt.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+.skin-swatch {
+  flex-shrink: 0;
+  display: flex;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+}
+.skin-swatch i { display: block; width: 9px; height: 22px; }
+
+.skin-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.skin-name { font-size: 0.83rem; font-weight: 600; }
+.skin-desc { font-size: 0.68rem; color: var(--text-muted); }
+.skin-check { flex-shrink: 0; color: var(--accent); font-weight: 700; width: 1ch; }
+
+/* Three representative colours per skin: surface, ink/rule, accent. Literal
+   values on purpose — a swatch must show *its own* skin, not the active one. */
+[data-swatch="bento"]   i:nth-child(1) { background: #141416; }
+[data-swatch="bento"]   i:nth-child(2) { background: #1c1c1e; }
+[data-swatch="bento"]   i:nth-child(3) { background: #b98cf5; }
+[data-swatch="ops"]     i:nth-child(1) { background: #111720; }
+[data-swatch="ops"]     i:nth-child(2) { background: #232c38; }
+[data-swatch="ops"]     i:nth-child(3) { background: #4d9bf5; }
+[data-swatch="crt"]     i:nth-child(1) { background: #0d0900; }
+[data-swatch="crt"]     i:nth-child(2) { background: #6b4a00; }
+[data-swatch="crt"]     i:nth-child(3) { background: #ffb642; }
+[data-swatch="paper"]   i:nth-child(1) { background: #f7f4ed; }
+[data-swatch="paper"]   i:nth-child(2) { background: #cfc7b6; }
+[data-swatch="paper"]   i:nth-child(3) { background: #8c2f24; }
+[data-swatch="classic"] i:nth-child(1) { background: #16161f; }
+[data-swatch="classic"] i:nth-child(2) { background: #282a3a; }
+[data-swatch="classic"] i:nth-child(3) { background: #6b9af2; }
+
+/* ── Mirrored network sparkline ───────────────────────────────────
+   Download above the midline, upload below, on a shared scale. The
+   baseline moves to the centre, so the card's bottom rule is dropped. */
+.spark.mirrored { border-bottom: none; }
+.spark-mid {
+  stroke: var(--card-border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.net-rx { --m: var(--m-net); }
+.net-tx { --m: var(--m-disk); }
+.net-rx .spark-line,
+.net-tx .spark-line { stroke: var(--m); }
+.net-rx .spark-area,
+.net-tx .spark-area { fill: color-mix(in srgb, var(--m) 16%, transparent); }
+/* Upload peak sits under the midline, so its label goes bottom-left. */
+.spark-peak.low {
+  top: auto;
+  bottom: 3px;
+  color: var(--m-disk);
+}
+
+/* Service outage rows in the shared alert log — no threshold, no peak. */
+.alert-row.service .al-mark { color: var(--offline); }
+.al-level.down {
+  color: var(--offline);
+  background: color-mix(in srgb, var(--offline) 16%, transparent);
+}
+
+/* ── Metric detail modal ──────────────────────────────────────────
+   Opened by clicking a stat card. Reuses .modal-overlay / .modal so
+   sizing, scrolling and the close affordance stay consistent with
+   Settings; only the body is bespoke. */
+.stat-card.expandable { cursor: pointer; }
+.stat-card.expandable:hover {
+  border-color: var(--m, var(--accent));
+  transform: translateY(var(--card-lift));
+}
+.stat-card.expandable:focus-visible {
+  outline: 2px solid var(--m, var(--accent));
+  outline-offset: 2px;
+}
+
+/* --m is set on the overlay in JS from the clicked card's metric. */
+.metric-modal { max-width: 760px; --m: var(--accent); }
+
+.metric-ranges { display: flex; gap: 0.35rem; margin-bottom: 0.9rem; }
+.range-btn {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  padding: 0.28rem 0.7rem;
+  background: var(--bg-alt);
+  color: var(--text-muted);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.range-btn:hover { color: var(--text); }
+.range-btn.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.metric-loading {
+  padding: 2.2rem 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.chart-box {
+  position: relative;
+  height: 210px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-alt);
+  overflow: hidden;
+}
+.chart-box svg { width: 100%; height: 100%; display: block; }
+.chart-band { fill: color-mix(in srgb, var(--m, var(--accent)) 18%, transparent); stroke: none; }
+
+.axis-hi, .axis-lo {
+  position: absolute;
+  left: 6px;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.axis-hi { top: 4px; }
+.axis-lo { bottom: 4px; }
+
+.chart-times {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  margin-top: 0.3rem;
+}
+.chart-note { font-size: 0.66rem; color: var(--text-muted); margin-top: 0.3rem; }
+
+.metric-figures { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.fig-row {
+  display: flex;
+  align-items: baseline;
+  gap: 1.1rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.7rem;
+  background: var(--bg-alt);
+  border-radius: var(--radius-sm);
+}
+.fig-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  min-width: 5rem;
+}
+.fig { display: flex; flex-direction: column; }
+.fig b {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+.fig i { font-style: normal; font-size: 0.62rem; color: var(--text-muted); }
+
+.metric-detail {
+  margin-top: 0.8rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.metric-alerts { margin-top: 1rem; }
+.metric-alerts-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+.metric-alerts-title.muted { opacity: 0.7; }
+.ma-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  padding: 0.25rem 0;
+  color: var(--text-muted);
+}

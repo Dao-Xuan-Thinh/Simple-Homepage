@@ -21,6 +21,7 @@ Complete reference for the Mac Mini Stats API.
    - [GET /api/tailscale](#get-apitailscale)
    - [GET /api/docker](#get-apidocker)
    - [GET /api/alerts](#get-apialerts)
+   - [GET /api/history](#get-apihistory)
    - [GET /api/logs](#get-apilogs)
 5. [Response Formats](#response-formats)
 6. [Examples](#examples)
@@ -482,8 +483,9 @@ when no browser tab is open. Persisted to `alerts.json` and kept across restarts
       "started_at": 1783999100, "updated_at": 1783999260, "ended_at": null }
   ],
   "rules": {
-    "cpu":  { "label": "CPU", "unit": "%", "warn": 80, "crit": 95 },
-    "load": { "label": "Load", "unit": "", "warn": 1.0, "crit": 2.0, "per_core": true }
+    "cpu":     { "label": "CPU", "unit": "%", "warn": 80, "crit": 95, "margin": 5 },
+    "swap_gb": { "label": "Swap", "unit": " GB", "warn": 4, "crit": 8, "margin": 0.75 },
+    "load":    { "label": "Load", "unit": "", "warn": 1.0, "crit": 2.0, "margin": 0.25, "per_core": true }
   },
   "ts": 1784003200
 }
@@ -494,8 +496,9 @@ when no browser tab is open. Persisted to `alerts.json` and kept across restarts
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | int | Stable identifier for the episode (`started_at × 100 + metric index`) |
-| `metric` | string | One of `cpu`, `ram`, `swap`, `temp`, `load`, `disk` |
-| `label` / `unit` | string | Display label and unit for the metric |
+| `kind` | string | `"metric"` (a threshold breach) or `"service"` (an outage). **Absent on episodes written before outages existed — treat missing as `"metric"`** |
+| `metric` | string | For `kind: "metric"`, one of `cpu`, `ram`, `swap_gb`, `temp`, `load`, `disk`. For `kind: "service"`, the service id from `config.json` |
+| `label` / `unit` | string | Display label and unit for the metric (`unit` is empty for services) |
 | `level` | string | Highest severity reached: `"warning"` or `"critical"` |
 | `threshold` | float | The warn threshold that opened the episode (load resolved against core count) |
 | `peak` | float | Highest value observed during the episode |
@@ -504,11 +507,92 @@ when no browser tab is open. Persisted to `alerts.json` and kept across restarts
 **Detection semantics** (all server-side, see `alert_loop` in `server.py`):
 - An episode **opens** after a metric is above its `warn` threshold for 2 consecutive samples (~40 s) — brief spikes are ignored.
 - While open, it tracks the `peak` and escalates `warning → critical` if the value crosses `crit`.
-- It **closes** (sets `ended_at`) once the value drops below `warn − 5` (hysteresis, so a metric hovering at the line doesn't flap).
-- `rules` echoes the current thresholds. `load` warn/crit are multipliers against `psutil.cpu_count()`; the resolved absolute value is stored per-episode in `threshold`.
+- It **closes** (sets `ended_at`) once the value drops below `warn − margin` (hysteresis, so a metric hovering at the line doesn't flap). `margin` is per-rule and in the metric's own units — a flat margin would leave a small-scale rule like `swap_gb` (warn 4) with a negative close threshold, so it could never clear.
+- `rules` echoes the current thresholds. `load` warn/crit **and its margin** are multipliers against `psutil.cpu_count()`; the resolved absolute value is stored per-episode in `threshold`.
+- **Swap is alerted on in absolute GB (`swap_gb`), not as a percentage.** macOS sizes its swapfiles dynamically — it adds another when the current one fills — so `used/total` is a sawtooth that sits in a 50–90% band by design and carries no information about memory pressure. Observed on this machine: the same ~1.5 GB of swap read as 94% one day and 50% the next, purely because the total grew from 2 GB to 3 GB. The percentage is still recorded under `swap` in `/api/history` for the graphs.
 - On restart, any episode left ongoing is finalized to its last-known time (live state can't be resumed).
 
+**Service outages** (`kind: "service"`) are recorded by the same machinery, driven by the 30-second
+`refresh_statuses()` probe instead of a threshold:
+- An outage **opens** after 2 consecutive failed checks (~60 s), so a single blip is ignored.
+- It **closes** on the first successful check.
+- `level` is always `"critical"`, and `threshold` / `peak` are **absent** — a service is either
+  reachable or it isn't. Clients must branch on `kind` before reading `peak`.
+
 **Refresh Rate**: Call every ~30 seconds.
+
+---
+
+### GET /api/history
+
+Metric history, used to **backfill the dashboard graphs** so a freshly-opened tab shows a real time
+window instead of drawing itself in from nothing. Fed by the same background loop as `/api/alerts`
+(one sample every ~20 s, 24/7) in **two tiers**:
+
+| Tier | Resolution | Retention | Storage | Used for |
+|------|-----------|-----------|---------|----------|
+| `fine` | every sample (~20 s) | last 200 samples (~66 min) | in memory | the 30-minute card sparklines |
+| `bucket` | 5-minute `min`/`avg`/`max` | 7 days (2016 buckets) | `history.json` | the 6 h / 24 h expanded views and the disk-fill projection |
+
+The tier is chosen from the requested window: **≤ 60 minutes returns `fine`, anything longer returns
+`bucket`**. The two have *different point shapes*, so always branch on `res`.
+
+**URL**: `/api/history?minutes=30&token=<TOKEN>`
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `minutes` | int | 30 | How far back to return samples (1–10080, i.e. up to 7 days) |
+| `token` | string | (required) | API read token |
+
+**Response — `fine` (200 OK):** scalar values.
+
+```json
+{
+  "points": [
+    { "t": 1784966650, "cpu": 10.7, "ram": 75.4, "swap": 50.2, "temp": 51.0,
+      "load": 3.05, "disk": 85.1, "power": 13.93, "net_rx": 22.6, "net_tx": 67.8 }
+  ],
+  "res": "fine",
+  "interval": 20,
+  "minutes": 30,
+  "ts": 1784966660
+}
+```
+
+**Response — `bucket` (200 OK):** each metric is an aggregate over the 5-minute window.
+
+```json
+{
+  "points": [
+    { "t": 1784966400,
+      "cpu":  { "min": 4.1, "avg": 12.7, "max": 92.4 },
+      "disk": { "min": 85.0, "avg": 85.1, "max": 85.1 } }
+  ],
+  "res": "bucket",
+  "interval": 300,
+  "minutes": 1440,
+  "ts": 1784966660
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `points` | array | Samples/buckets, **oldest first**. `t` is Unix epoch (s); for buckets it is the start of the 5-minute slot, aligned to wall-clock boundaries |
+| `res` | string | `"fine"` (scalar values) or `"bucket"` (min/avg/max objects) |
+| `interval` | int | Nominal seconds per point (20 for `fine`, 300 for `bucket`) |
+| `minutes` | int | The window actually applied (after clamping) |
+
+Metric keys match `/api/alerts` (`cpu`, `ram`, `swap`, `temp`, `load`, `disk`) plus `power` (watts,
+measured) and `net_rx` / `net_tx` (KB/s, from the counter delta between samples) — those three have no
+alert rules attached. **Any key may be absent from a point** if that sensor was unavailable; consumers
+should skip missing keys rather than assume zero. `net_rx`/`net_tx` are always absent from the first
+sample after a restart, since a rate needs two readings.
+
+**Refresh Rate**: Fetch once on page load for the 30-minute window. The dashboard then extends the
+series live from `/api/stats`, re-fetching only after the tab has been backgrounded long enough to
+leave a gap. The bucketed windows are fetched on demand when a card is expanded.
 
 ---
 
