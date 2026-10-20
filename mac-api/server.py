@@ -22,6 +22,7 @@ Endpoints:
 CORS is pre-configured for dao-xuan-thinh.github.io and localhost.
 """
 
+import calendar
 import collections
 import json
 import re
@@ -43,6 +44,17 @@ try:
 except ImportError:
     print("ERROR: psutil not installed. Run:  pip3 install psutil")
     raise
+
+
+def log(msg):
+    """print() for the background threads. stdout is api.log, so a full disk makes
+    print itself raise OSError - inside an except handler that escapes and kills the
+    thread for good (that is how history, alerts and status froze on 2026-09-27).
+    A lost log line is fine; a dead sampler is not."""
+    try:
+        print(msg, flush=True)
+    except Exception:
+        pass
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
@@ -184,7 +196,7 @@ def load_config():
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
     except Exception as exc:
-        print(f"[config] Failed to load {CONFIG_FILE}: {exc}")
+        log(f"[config] Failed to load {CONFIG_FILE}: {exc}")
         return {"projects": [], "services": []}
 
 
@@ -211,7 +223,7 @@ def load_energy():
     except FileNotFoundError:
         pass
     except Exception as exc:
-        print(f"[energy] Failed to load {ENERGY_FILE}: {exc}")
+        log(f"[energy] Failed to load {ENERGY_FILE}: {exc}")
 
 
 def save_energy(last_update):
@@ -228,7 +240,7 @@ def save_energy(last_update):
             json.dump(data, f, indent=2)
         os.replace(tmp, ENERGY_FILE)
     except Exception as exc:
-        print(f"[energy] Failed to save {ENERGY_FILE}: {exc}")
+        log(f"[energy] Failed to save {ENERGY_FILE}: {exc}")
 
 
 def get_macmon(interval_ms=200, samples=1):
@@ -249,6 +261,7 @@ def get_macmon(interval_ms=200, samples=1):
         d = json.loads(lines[-1])
         temp = d.get("temp", {}) or {}
         mem  = d.get("memory", {}) or {}
+        pcpu = d.get("pcpu_usage") or [None]   # [MHz, usage] of the performance cluster
         return {
             "cpu_temp":   temp.get("cpu_temp_avg"),
             "gpu_temp":   temp.get("gpu_temp_avg"),
@@ -258,6 +271,7 @@ def get_macmon(interval_ms=200, samples=1):
             "swap_total": mem.get("swap_total"),
             "sys_power":  d.get("sys_power"),
             "all_power":  d.get("all_power"),
+            "pcpu_mhz":   pcpu[0],
         }
     except Exception:
         return None
@@ -273,20 +287,23 @@ def energy_loop():
     last_update = time.time()
     while True:
         time.sleep(ENERGY_INTERVAL)
-        mac = get_macmon(interval_ms=1000)  # 1 s window for an accurate power read
-        now = time.time()
-        dt = min(now - last_update, 5 * ENERGY_INTERVAL)  # cap gaps (sleep/downtime)
-        if mac and mac.get("sys_power") is not None:
-            watts = mac["sys_power"]
-        elif mac and mac.get("all_power") is not None:
-            watts = mac["all_power"]
-        else:
-            watts = IDLE_BASE_W  # last-resort fallback if macmon is unavailable
-        with _energy_lock:
-            _energy["total_wh"] += watts * (dt / 3600.0)
-            _energy["power_w"]   = round(watts, 2)
-        save_energy(now)
-        last_update = now
+        try:
+            mac = get_macmon(interval_ms=1000)  # 1 s window for an accurate power read
+            now = time.time()
+            dt = min(now - last_update, 5 * ENERGY_INTERVAL)  # cap gaps (sleep/downtime)
+            if mac and mac.get("sys_power") is not None:
+                watts = mac["sys_power"]
+            elif mac and mac.get("all_power") is not None:
+                watts = mac["all_power"]
+            else:
+                watts = IDLE_BASE_W  # last-resort fallback if macmon is unavailable
+            with _energy_lock:
+                _energy["total_wh"] += watts * (dt / 3600.0)
+                _energy["power_w"]   = round(watts, 2)
+            save_energy(now)
+            last_update = now
+        except Exception as exc:
+            log(f"[energy] loop error: {exc}")
 
 
 # ── Alert / overload event log helpers ──────────────────────────────────────────
@@ -301,7 +318,7 @@ def load_alerts():
     except FileNotFoundError:
         return
     except Exception as exc:
-        print(f"[alerts] Failed to load {ALERTS_FILE}: {exc}")
+        log(f"[alerts] Failed to load {ALERTS_FILE}: {exc}")
         return
     events = data.get("events", []) if isinstance(data, dict) else data
     with _alerts_lock:
@@ -322,7 +339,7 @@ def save_alerts():
             json.dump(data, f, indent=2, ensure_ascii=False)
         os.replace(tmp, ALERTS_FILE)
     except Exception as exc:
-        print(f"[alerts] Failed to save {ALERTS_FILE}: {exc}")
+        log(f"[alerts] Failed to save {ALERTS_FILE}: {exc}")
 
 
 def _sample_alert_metrics():
@@ -509,6 +526,14 @@ def _step_downtime(services, now):
                     if len(_alerts) > ALERT_MAX:
                         del _alerts[:len(_alerts) - ALERT_MAX]
                     changed = True
+
+        # A service that was archived or deleted mid-outage is no longer checked, so
+        # nothing would ever close its episode - end it here instead.
+        checked = {svc.get("id") for svc in services}
+        for sid in [s for s in _down_active if s not in checked]:
+            _down_active.pop(sid)["ended_at"] = now
+            _down_pending.pop(sid, None)
+            changed = True
     return changed
 
 
@@ -526,7 +551,7 @@ def load_history():
     except FileNotFoundError:
         pass
     except Exception as exc:
-        print(f"[history] Failed to load {HISTORY_FILE}: {exc}")
+        log(f"[history] Failed to load {HISTORY_FILE}: {exc}")
 
 
 def save_history():
@@ -540,7 +565,7 @@ def save_history():
             json.dump(data, f, separators=(",", ":"))
         os.replace(tmp, HISTORY_FILE)
     except Exception as exc:
-        print(f"[history] Failed to save {HISTORY_FILE}: {exc}")
+        log(f"[history] Failed to save {HISTORY_FILE}: {exc}")
 
 
 def _close_bucket():
@@ -599,13 +624,16 @@ def alert_loop():
         try:
             sample = _sample_alert_metrics()
         except Exception as exc:
-            print(f"[alerts] sample error: {exc}")
+            log(f"[alerts] sample error: {exc}")
             continue
         now = int(time.time())
-        if _history_push(sample, now):   # a 5-minute bucket just closed
-            save_history()
-        if _step_alerts(sample, now, cores, pending):
-            save_alerts()
+        try:
+            if _history_push(sample, now):   # a 5-minute bucket just closed
+                save_history()
+            if _step_alerts(sample, now, cores, pending):
+                save_alerts()
+        except Exception as exc:
+            log(f"[alerts] loop error: {exc}")
 
 
 # ── Status checking ────────────────────────────────────────────────────────────
@@ -637,10 +665,11 @@ def check_url_reachable(url, timeout=4):
 
 
 def refresh_statuses():
-    """Check all services and projects in parallel; update _status_cache."""
+    """Check all services and projects in parallel; update _status_cache. Archived
+    entries are skipped - they are only listed on the page, never probed."""
     config = load_config()
-    services  = config.get("services", [])
-    projects  = config.get("projects", [])
+    services  = [s for s in config.get("services", []) if not s.get("archived")]
+    projects  = [p for p in config.get("projects", []) if not p.get("archived")]
 
     svc_results  = []
     proj_results = []
@@ -685,7 +714,7 @@ def refresh_statuses():
                 else:
                     proj_results.append(result)
             except Exception as exc:
-                print(f"[status] Error checking {item.get('id', '?')}: {exc}")
+                log(f"[status] Error checking {item.get('id', '?')}: {exc}")
 
     # Preserve ordering from config
     svc_order  = {s["id"]: i for i, s in enumerate(services)}
@@ -710,7 +739,7 @@ def status_refresh_loop():
         try:
             refresh_statuses()
         except Exception as exc:
-            print(f"[status] refresh error: {exc}")
+            log(f"[status] refresh error: {exc}")
         time.sleep(30)
 
 
@@ -985,14 +1014,18 @@ def get_stats():
 
     uptime_seconds = int(time.time() - psutil.boot_time())
 
-    # CPU frequency (not always available on Apple Silicon)
+    # CPU frequency. psutil reports a meaningless constant on Apple Silicon (4 "MHz"
+    # on macOS 27), so prefer macmon's performance-cluster frequency.
     cpu_freq = None
-    try:
-        freq = psutil.cpu_freq()
-        if freq:
-            cpu_freq = round(freq.current / 1000, 2)  # GHz
-    except Exception:
-        pass
+    if mac and mac.get("pcpu_mhz"):
+        cpu_freq = round(mac["pcpu_mhz"] / 1000, 2)  # GHz
+    else:
+        try:
+            freq = psutil.cpu_freq()
+            if freq and freq.current >= 100:
+                cpu_freq = round(freq.current / 1000, 2)  # GHz
+        except Exception:
+            pass
 
     # Temperature - macmon gives real CPU/GPU temp on Apple Silicon (no sudo).
     # Only if macmon is unavailable, fall back to osx-cpu-temp / powermetrics /
@@ -1126,12 +1159,15 @@ def get_logs(service_key, lines=50, container=None):
     return {"service": service_key, "lines": parsed}
 
 
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
 def parse_log_line(line):
     """
     Attempt to extract timestamp, level, and message from a log line.
     Handles Docker timestamped format and plain text logs.
     """
-    line = line.strip()
+    line = ANSI_RE.sub("", line).strip()   # Immich v3 colours its output
     if not line:
         return None
 
@@ -1140,11 +1176,12 @@ def parse_log_line(line):
         parts = line.split(" ", 1)
         ts_str = parts[0]
         rest = parts[1] if len(parts) > 1 else ""
-        # Format time as HH:MM:SS
+        # Docker timestamps are UTC - show HH:MM:SS in the server's local time
         try:
-            ts_part = ts_str.split("T")[1][:8]
-        except IndexError:
-            ts_part = "??:??:??"
+            utc = calendar.timegm(time.strptime(ts_str[:19], "%Y-%m-%dT%H:%M:%S"))
+            ts_part = time.strftime("%H:%M:%S", time.localtime(utc))
+        except ValueError:
+            ts_part = ts_str.split("T")[1][:8] if "T" in ts_str else "??:??:??"
         level, msg = extract_level(rest)
         return {"time": ts_part, "level": level, "msg": msg or rest}
 
@@ -1201,7 +1238,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         # Compact log format
-        print(f"[{self.log_date_time_string()}] {self.address_string()} - {fmt % args}")
+        log(f"[{self.log_date_time_string()}] {self.address_string()} - {fmt % args}")
 
     def do_OPTIONS(self):
         self.send_response(204)

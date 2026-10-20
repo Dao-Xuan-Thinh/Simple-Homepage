@@ -25,7 +25,8 @@
       "desc": "Server management dashboard",
       "url": "https://my-biggest-beefsteak.tail437237.ts.net",
       "check_url": "https://my-biggest-beefsteak.tail437237.ts.net",
-      "visibility": "public"
+      "visibility": "public",
+      "archived": true
     },
     {
       "id": "study-portal",
@@ -43,7 +44,8 @@
       "desc": "Experimental & WIP builds",
       "url": "https://my-biggest-beefsteak.tail437237.ts.net:10000/",
       "check_url": "https://my-biggest-beefsteak.tail437237.ts.net:10000/",
-      "visibility": "private"
+      "visibility": "private",
+      "archived": true
     },
     {
       "id": "standby",
@@ -118,7 +120,8 @@
       "port": 3000,
       "check_url": null,
       "docker": "openclaw",
-      "log_file": null
+      "log_file": null,
+      "archived": true
     },
     {
       "id": "ssa-project",
@@ -127,7 +130,8 @@
       "port": 8080,
       "check_url": null,
       "docker": null,
-      "log_file": null
+      "log_file": null,
+      "archived": true
     },
     {
       "id": "openclaw",
@@ -136,7 +140,8 @@
       "port": 10000,
       "check_url": "https://my-biggest-beefsteak.tail437237.ts.net:10000",
       "docker": null,
-      "log_file": null
+      "log_file": null,
+      "archived": true
     }
   ]
 }

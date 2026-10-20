@@ -432,6 +432,39 @@ function updateServiceStatuses(svcArr) {
   });
 }
 
+/* ── Archived entries ───────────────────────────────────────────────
+   Entries flagged `archived` in config.json leave the live grids and the log
+   selector, and are listed here instead. The server doesn't probe them. */
+const isLive = x => !x.archived;
+
+function renderArchive(config) {
+  const section = document.getElementById('archive-section');
+  const grid = document.getElementById('archive-grid');
+  if (!section || !grid) return;
+  const items = [
+    ...(config.projects || []).filter(p => p.archived).map(p => ({ ...p, kind: 'Project', sub: p.desc })),
+    ...(config.services || []).filter(s => s.archived).map(s => ({ ...s, kind: 'Service', sub: s.detail })),
+  ];
+  section.hidden = !items.length;
+  document.getElementById('badge-archived').textContent = items.length;
+  grid.innerHTML = items.map(x => `
+      <div class="card archived-card">
+        <div class="card-icon">${escapeHtml(x.icon || '◉')}</div>
+        <div class="card-body">
+          <div class="card-name">${escapeHtml(x.name)} <span class="vis-badge">${x.kind}</span></div>
+          <div class="card-desc">${escapeHtml(x.sub || '')}</div>
+        </div>
+      </div>`).join('');
+}
+
+function renderConfig(config) {
+  const services = (config.services || []).filter(isLive);
+  renderProjectCards((config.projects || []).filter(isLive));
+  renderServiceCards(services);
+  populateLogSelector(services);
+  renderArchive(config);
+}
+
 /* ── Log selector ───────────────────────────────────────────────── */
 function populateLogSelector(services) {
   const sel = document.getElementById('log-server');
@@ -1672,6 +1705,10 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 /* Settings list rendering */
+function archiveToggleHtml(checked) {
+  return `<label class="entry-archive"><input type="checkbox" data-field="archived" ${checked ? 'checked' : ''} /> Archived</label>`;
+}
+
 function makeDeleteBtn(onClick) {
   const btn = document.createElement('button');
   btn.className = 'btn-delete';
@@ -1744,6 +1781,7 @@ function populateSettingsModal(config) {
           <option value="public"  ${p.visibility === 'public'  ? 'selected' : ''}>Public</option>
           <option value="private" ${p.visibility === 'private' ? 'selected' : ''}>Private</option>
         </select>
+        ${archiveToggleHtml(p.archived)}
       </div>`;
     li.appendChild(makeDeleteBtn(() => { li.remove(); }));
     projList.appendChild(li);
@@ -1768,6 +1806,7 @@ function populateSettingsModal(config) {
         <input type="number" data-field="port"   value="${escapeHtml(s.port ?? '')}"  placeholder="Port"   min="1" max="65535" />
         <input type="url"    data-field="check_url" value="${escapeHtml(s.check_url || '')}" placeholder="Check URL (optional)" />
         <input type="text"   data-field="docker" value="${escapeHtml(s.docker || '')}" placeholder="Docker container (optional)" />
+        ${archiveToggleHtml(s.archived)}
       </div>`;
     li.appendChild(makeDeleteBtn(() => {
       document.querySelector(`.log-svc-section[data-log-key="${key}"]`)?.remove();
@@ -1802,6 +1841,7 @@ document.getElementById('btn-add-proj').addEventListener('click', () => {
         <option value="public"  ${vis === 'public'  ? 'selected' : ''}>Public</option>
         <option value="private" ${vis === 'private' ? 'selected' : ''}>Private</option>
       </select>
+      ${archiveToggleHtml(false)}
     </div>`;
   li.appendChild(makeDeleteBtn(() => li.remove()));
   document.getElementById('proj-list').appendChild(li);
@@ -1833,6 +1873,7 @@ document.getElementById('btn-add-svc').addEventListener('click', () => {
       <input type="number" data-field="port"      value="${escapeHtml(port)}"   placeholder="Port"   min="1" max="65535" />
       <input type="url"    data-field="check_url" value="${escapeHtml(check)}"  placeholder="Check URL" />
       <input type="text"   data-field="docker"    value="${escapeHtml(docker)}" placeholder="Docker container" />
+      ${archiveToggleHtml(false)}
     </div>`;
   li.appendChild(makeDeleteBtn(() => {
     document.querySelector(`.log-svc-section[data-log-key="${key}"]`)?.remove();
@@ -1861,6 +1902,7 @@ function collectConfig() {
       url,
       check_url:  get('check_url') || url,
       visibility: get('visibility') || 'public',
+      archived:   li.querySelector('[data-field="archived"]')?.checked || undefined,
     });
   });
 
@@ -1894,6 +1936,7 @@ function collectConfig() {
       docker:     primaryDocker,
       containers: containers.length > 0 ? containers : undefined,
       log_file:   null,
+      archived:   li.querySelector('[data-field="archived"]')?.checked || undefined,
     });
   });
 
@@ -1936,10 +1979,7 @@ btnSave.addEventListener('click', async () => {
     }
     // Update local config and re-render
     _config = newConfig;
-    renderProjectCards(newConfig.projects);
-    renderServiceCards(newConfig.services);
-    populateLogSelector(newConfig.services);
-    updateContainerSelector(newConfig.services);
+    renderConfig(newConfig);
     refreshLog();
     // Fetch fresh statuses immediately
     setTimeout(() => fetchAndRenderServices(), 500);
@@ -1965,9 +2005,7 @@ btnSave.addEventListener('click', async () => {
   if (config && (config.projects || config.services)) {
     _config = config;
   }
-  renderProjectCards(_config.projects);
-  renderServiceCards(_config.services);
-  populateLogSelector(_config.services);
+  renderConfig(_config);
 
   // 1b. Downloads — sourced from GitHub, independent of the Mac mini API
   initDownloads();

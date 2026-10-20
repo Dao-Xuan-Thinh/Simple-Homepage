@@ -748,6 +748,39 @@ footer a:hover { text-decoration: underline; }
   margin-left: 4px;
 }
 
+/* ── Archived section (collapsed by default) ───────────────────── */
+.archive > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.archive > summary::-webkit-details-marker { display: none; }
+.archive:not([open]) > summary { margin-bottom: 0; }
+.archive-caret {
+  color: var(--text-muted);
+  transition: transform var(--transition);
+}
+.archive[open] .archive-caret { transform: rotate(90deg); }
+
+.archived-card {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  opacity: 0.6;
+}
+.archived-card .card-icon { filter: grayscale(1); }
+
+/* "Archived" checkbox in the settings entries */
+.entry-fields .entry-archive {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.entry-fields .entry-archive input { padding: 0; }
+
 /* ─────────────────────────────────────────────────────────────────
    SETTINGS MODAL
    ───────────────────────────────────────────────────────────────── */

@@ -249,6 +249,7 @@ Fetch the current configuration (projects and services).
 | `url` | string | Yes | Link to the project |
 | `check_url` | string | No | Health check URL (defaults to `url` if omitted) |
 | `visibility` | string | Yes | "public" (visible) or "private" (hidden) |
+| `archived` | bool | No | `true` moves it to the collapsed Archived section and stops health checks |
 
 **Field Descriptions (Services):**
 
@@ -262,6 +263,7 @@ Fetch the current configuration (projects and services).
 | `containers` | array | No | List of `{label, docker}` objects for multi-container support |
 | `log_file` | string | No | Path to a log file (fallback if Docker unavailable) |
 | `check_url` | string | No | HTTP URL for health checks |
+| `archived` | bool | No | `true` moves it to the collapsed Archived section and stops health checks, outage logging and logs |
 
 **Refresh Rate**: Call on app startup; cache client-side. Refetch after `PUT /api/config`.
 
