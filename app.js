@@ -901,7 +901,7 @@ async function loadMetricRange() {
   };
 
   if (view.mirrored) {
-    renderBigNetChart(chart, data.points, pick);
+    renderBigNetChart(chart, data.points, pick, bucketed);
   } else {
     renderBigChart(chart, data.points, view.key, pick, bucketed);
   }
@@ -960,9 +960,18 @@ function renderBigChart(chart, points, key, pick, bucketed) {
     `</div>` +
     `<div class="chart-times"><span>${alertClock(t0)}</span><span>${alertClock(t1)}</span></div>` +
     (bucketed ? '<div class="chart-note">Shaded band = min–max within each 5-minute bucket</div>' : '');
+
+  attachChartHover(chart.querySelector('.chart-box'), series.map(p => ({
+    x: x(p.t),
+    when: hoverWhen(p.t, bucketed),
+    marks: [{
+      cls: '', y: y(p.s.avg), value: cfg.fmt(p.s.avg), label: bucketed ? 'avg' : '',
+      range: bucketed ? hoverRange(cfg.fmt, p.s) : '',
+    }],
+  })), W, H);
 }
 
-function renderBigNetChart(chart, points, pick) {
+function renderBigNetChart(chart, points, pick, bucketed) {
   const rx = points.map(p => ({ t: p.t, s: pick(p, 'net_rx') })).filter(p => p.s);
   const tx = points.map(p => ({ t: p.t, s: pick(p, 'net_tx') })).filter(p => p.s);
   if (rx.length < 2 && tx.length < 2) {
@@ -978,9 +987,11 @@ function renderBigNetChart(chart, points, pick) {
   const scale = Math.max(peakRx, peakTx, 1);
 
   const x = t => ((t - t0) / span) * W;
+  // dir +1 draws upward from the midline, -1 downward.
+  const yAt = (v, dir) => MID - dir * (v / scale) * (MID - 1);
   const trace = (pts, dir) => {
     if (pts.length < 2) return '';
-    const y = v => MID - dir * (v / scale) * (MID - 1);
+    const y = v => yAt(v, dir);
     const line = pts.map(p => `${x(p.t).toFixed(1)},${y(p.s.avg).toFixed(1)}`).join(' ');
     const area = `${x(pts[0].t).toFixed(1)},${MID} ${line} ${x(pts[pts.length - 1].t).toFixed(1)},${MID}`;
     return `<polygon class="spark-area" points="${area}"></polygon>` +
@@ -998,6 +1009,117 @@ function renderBigNetChart(chart, points, pick) {
       `<span class="axis-lo">↑ ${fmtRate(peakTx)}</span>` +
     `</div>` +
     `<div class="chart-times"><span>${alertClock(t0)}</span><span>${alertClock(t1)}</span></div>`;
+
+  const mark = (s, dir, cls, label) => s && {
+    cls, label, y: yAt(s.avg, dir), value: fmtRate(s.avg),
+    range: bucketed ? hoverRange(fmtRate, s) : '',
+  };
+  attachChartHover(chart.querySelector('.chart-box'), points.map(p => {
+    const marks = [mark(pick(p, 'net_rx'), 1, 'net-rx', '↓ down'),
+                   mark(pick(p, 'net_tx'), -1, 'net-tx', '↑ up')].filter(Boolean);
+    return marks.length && { x: x(p.t), when: hoverWhen(p.t, bucketed), marks };
+  }).filter(Boolean), W, H);
+}
+
+/* ── Chart hover ────────────────────────────────────────────────────
+   Crosshair + tooltip for the expanded charts: snaps to the nearest sample
+   and lists every series at that time. The SVG is stretched
+   (preserveAspectRatio="none"), so the overlay is plain HTML placed in
+   percentages of the viewBox rather than drawn inside the SVG. Each stop is
+   { x, when, marks: [{ cls, y, value, label, range }] } in viewBox units. */
+const BUCKET_S = 300;  // the server's BUCKET_SECONDS: one bucketed point spans this long
+
+function hoverWhen(t, bucketed) {
+  const day = alertSameDay(t) ? '' : alertDate(t) + ' ';
+  if (bucketed) return `${day}${alertClock(t)} – ${alertClock(t + BUCKET_S)}`;
+  return day + new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// "min – max" for a bucket, or nothing when both ends format the same.
+function hoverRange(fmt, s) {
+  const lo = fmt(s.min), hi = fmt(s.max);
+  return lo === hi ? '' : `${lo} – ${hi}`;
+}
+
+function attachChartHover(box, stops, W, H) {
+  if (!box || stops.length < 2) return;
+  const hair = document.createElement('div');
+  hair.className = 'chart-hair';
+  const tip = document.createElement('div');
+  tip.className = 'chart-tip';
+  box.append(hair, tip);
+  box.tabIndex = 0;
+  let idx = null;
+
+  const show = i => {
+    idx = i;
+    const s = stops[i];
+    const left = (s.x / W) * 100;
+    hair.style.left = `${left}%`;
+    tip.style.left = `${left}%`;
+    tip.classList.toggle('flip', left > 60);
+    box.querySelectorAll('.chart-dot').forEach(d => d.remove());
+
+    const when = document.createElement('div');
+    when.className = 'tip-time';
+    when.textContent = s.when;
+    tip.replaceChildren(when);
+    s.marks.forEach(m => {
+      const dot = document.createElement('div');
+      dot.className = `chart-dot ${m.cls}`;
+      dot.style.left = `${left}%`;
+      dot.style.top = `${(m.y / H) * 100}%`;
+      box.append(dot);
+
+      const row = document.createElement('div');
+      row.className = `tip-row ${m.cls}`;
+      const key = document.createElement('span');
+      key.className = 'tip-key';
+      const val = document.createElement('b');
+      val.textContent = m.value;
+      row.append(key, val);
+      for (const [cls, text] of [['tip-label', m.label], ['tip-range', m.range]]) {
+        if (!text) continue;
+        const span = document.createElement('span');
+        span.className = cls;
+        span.textContent = text;
+        row.append(span);
+      }
+      tip.append(row);
+    });
+    box.classList.add('hovering');
+  };
+  const hide = () => {
+    box.classList.remove('hovering');
+    box.querySelectorAll('.chart-dot').forEach(d => d.remove());
+  };
+
+  // Binary search for the stop nearest the pointer; stops are in time order.
+  const nearest = clientX => {
+    const r = box.getBoundingClientRect();
+    const vx = ((clientX - r.left) / r.width) * W;
+    let lo = 0, hi = stops.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (stops[mid].x < vx) lo = mid; else hi = mid;
+    }
+    return vx - stops[lo].x <= stops[hi].x - vx ? lo : hi;
+  };
+
+  box.addEventListener('pointermove', e => show(nearest(e.clientX)));
+  box.addEventListener('pointerdown', e => show(nearest(e.clientX)));
+  // A finger lifting fires pointerleave too - keep the readout up for touch.
+  box.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hide(); });
+  box.addEventListener('focus', () => show(idx ?? stops.length - 1));
+  box.addEventListener('blur', hide);
+  box.addEventListener('keydown', e => {
+    const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+    if (step) show(Math.min(stops.length - 1, Math.max(0, (idx ?? stops.length - 1) + step)));
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(stops.length - 1);
+    else return;
+    e.preventDefault();
+  });
 }
 
 function renderMetricFigures(points, view, pick) {

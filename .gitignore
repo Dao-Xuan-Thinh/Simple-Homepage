@@ -12,3 +12,4 @@ __pycache__/
 energy.json
 alerts.json
 history.json
+history-live.json

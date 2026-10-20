@@ -1928,6 +1928,58 @@ body[data-skin="paper"] .card:hover { box-shadow: none; }
 }
 .chart-note { font-size: 0.66rem; color: var(--text-muted); margin-top: 0.3rem; }
 
+/* Hover layer: crosshair, a dot per series, and one tooltip (see attachChartHover) */
+.chart-box { cursor: crosshair; touch-action: none; }
+.chart-box:focus { outline: none; }
+.chart-box:focus-visible { outline: 2px solid var(--m, var(--accent)); outline-offset: 2px; }
+.chart-hair,
+.chart-tip { display: none; position: absolute; pointer-events: none; }
+.chart-box.hovering .chart-hair,
+.chart-box.hovering .chart-tip { display: block; }
+.chart-hair {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--text-muted);
+  opacity: 0.55;
+}
+.chart-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--m, var(--accent));
+  box-shadow: 0 0 0 2px var(--bg-alt);
+  pointer-events: none;
+}
+.chart-tip {
+  top: 8px;
+  z-index: 2;
+  transform: translateX(10px);
+  padding: 0.4rem 0.55rem;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+.chart-tip.flip { transform: translateX(calc(-100% - 10px)); }
+.tip-time { color: var(--text-muted); margin-bottom: 0.2rem; }
+.tip-row { display: flex; align-items: center; gap: 0.4rem; }
+.tip-row b { font-weight: 700; }
+.tip-key {
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--m, var(--accent));
+}
+.tip-label,
+.tip-range { color: var(--text-muted); }
+
 .metric-figures { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
 .fig-row {
   display: flex;

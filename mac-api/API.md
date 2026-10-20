@@ -512,7 +512,7 @@ when no browser tab is open. Persisted to `alerts.json` and kept across restarts
 - It **closes** (sets `ended_at`) once the value drops below `warn − margin` (hysteresis, so a metric hovering at the line doesn't flap). `margin` is per-rule and in the metric's own units — a flat margin would leave a small-scale rule like `swap_gb` (warn 4) with a negative close threshold, so it could never clear.
 - `rules` echoes the current thresholds. `load` warn/crit **and its margin** are multipliers against `psutil.cpu_count()`; the resolved absolute value is stored per-episode in `threshold`.
 - **Swap is alerted on in absolute GB (`swap_gb`), not as a percentage.** macOS sizes its swapfiles dynamically — it adds another when the current one fills — so `used/total` is a sawtooth that sits in a 50–90% band by design and carries no information about memory pressure. Observed on this machine: the same ~1.5 GB of swap read as 94% one day and 50% the next, purely because the total grew from 2 GB to 3 GB. The percentage is still recorded under `swap` in `/api/history` for the graphs.
-- On restart, any episode left ongoing is finalized to its last-known time (live state can't be resumed).
+- On restart, an episode left ongoing **resumes** if it was last updated within 5 minutes, so a quick restart doesn't split one incident into two entries (if the condition cleared meanwhile, the next sample closes it). Older ones are finalized to their last-known time.
 
 **Service outages** (`kind: "service"`) are recorded by the same machinery, driven by the 30-second
 `refresh_statuses()` probe instead of a threshold:
@@ -533,8 +533,11 @@ window instead of drawing itself in from nothing. Fed by the same background loo
 
 | Tier | Resolution | Retention | Storage | Used for |
 |------|-----------|-----------|---------|----------|
-| `fine` | every sample (~20 s) | last 200 samples (~66 min) | in memory | the 30-minute card sparklines |
+| `fine` | every sample (~20 s) | last 200 samples (~66 min) | `history-live.json`, saved every ~60 s | the 30-minute card sparklines |
 | `bucket` | 5-minute `min`/`avg`/`max` | 7 days (2016 buckets) | `history.json` | the 6 h / 24 h expanded views and the disk-fill projection |
+
+`history-live.json` also holds the 5-minute bucket still filling. Both files are written on a clean
+stop (SIGTERM / Ctrl-C), so a restart loses at most the last minute of samples.
 
 The tier is chosen from the requested window: **≤ 60 minutes returns `fine`, anything longer returns
 `bucket`**. The two have *different point shapes*, so always branch on `res`.

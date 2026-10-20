@@ -33,6 +33,7 @@ import threading
 import time
 import os
 import shutil
+import signal
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -156,15 +157,20 @@ _alerts_lock   = threading.Lock()
 # graphs show a real time window the instant a browser tab opens instead of only what that
 # tab has watched live. Two tiers:
 #
-#   fine   - every sample, in memory, ~1 h. Full resolution for the 30-minute sparklines.
+#   fine   - every sample, ~1 h. Full resolution for the 30-minute sparklines. Saved to
+#            history-live.json every HISTORY_LIVE_EVERY samples, together with the bucket
+#            still filling, so a restart only loses the last minute or so.
 #   bucket - 5-minute min/avg/max aggregates, persisted to history.json, 7 days. Backs the
-#            expanded card views (6 h / 24 h) and the disk-usage trend projection, and
-#            survives a server restart.
+#            expanded card views (6 h / 24 h) and the disk-usage trend projection.
+# Both files are also written on a clean stop (SIGTERM / Ctrl-C).
 HISTORY_MAX     = 200    # fine samples kept; at ALERT_INTERVAL=20 s that's ~66 min
 BUCKET_SECONDS  = 300    # 5-minute aggregation buckets
 BUCKET_MAX      = 2016   # 7 days of 5-minute buckets
 BUCKET_FINE_MAX = 60     # /api/history windows <= this many minutes use the fine tier
 HISTORY_FILE    = os.path.join(os.path.dirname(CONFIG_FILE), "history.json")
+HISTORY_LIVE_FILE  = os.path.join(os.path.dirname(CONFIG_FILE), "history-live.json")
+HISTORY_LIVE_EVERY = 3    # samples between history-live.json saves (~1 min)
+RESUME_GAP         = 300  # an episode still open at shutdown resumes if we're back within this
 
 _history      = collections.deque(maxlen=HISTORY_MAX)
 _buckets      = collections.deque(maxlen=BUCKET_MAX)  # closed buckets, oldest first
@@ -309,9 +315,10 @@ def energy_loop():
 # ── Alert / overload event log helpers ──────────────────────────────────────────
 
 def load_alerts():
-    """Load persisted episodes into _alerts. Any episode still marked ongoing at the
-    last shutdown is finalized to its last-known time - we can't resume live state
-    after a restart, so it becomes a closed historical entry."""
+    """Load persisted episodes into _alerts. An episode still marked ongoing at the last
+    shutdown resumes if it was updated within RESUME_GAP - a quick restart shouldn't split
+    one incident into two entries; if the condition cleared meanwhile, the next sample
+    closes it. Older ones are finalized to their last-known time."""
     try:
         with open(ALERTS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -321,11 +328,19 @@ def load_alerts():
         log(f"[alerts] Failed to load {ALERTS_FILE}: {exc}")
         return
     events = data.get("events", []) if isinstance(data, dict) else data
+    now = int(time.time())
     with _alerts_lock:
         _alerts.clear()
+        _alerts_active.clear()
+        _down_active.clear()
         for ev in events:
             if ev.get("ended_at") is None:
-                ev["ended_at"] = ev.get("updated_at") or ev.get("started_at")
+                last = ev.get("updated_at") or ev.get("started_at")
+                active = _down_active if ev.get("kind") == "service" else _alerts_active
+                if now - last <= RESUME_GAP and ev.get("metric") not in active:
+                    active[ev["metric"]] = ev
+                else:
+                    ev["ended_at"] = last
             _alerts.append(ev)
 
 
@@ -553,6 +568,40 @@ def load_history():
     except Exception as exc:
         log(f"[history] Failed to load {HISTORY_FILE}: {exc}")
 
+    global _bucket_start
+    try:
+        with open(HISTORY_LIVE_FILE, "r", encoding="utf-8") as f:
+            live = json.load(f)
+        cutoff = int(time.time()) - HISTORY_MAX * ALERT_INTERVAL
+        with _history_lock:
+            _history.clear()
+            _history.extend(p for p in live.get("fine", []) if isinstance(p, dict) and p.get("t", 0) >= cutoff)
+            # Restore the bucket that was filling. If its slot has passed, the next
+            # sample closes it into _buckets as usual.
+            if live.get("open_start") and isinstance(live.get("open"), dict):
+                _bucket_open.clear()
+                _bucket_open.update(live["open"])
+                _bucket_start = live["open_start"]
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        log(f"[history] Failed to load {HISTORY_LIVE_FILE}: {exc}")
+
+
+def save_history_live():
+    """Atomically persist the fine tier and the bucket still filling - small (~30 KB),
+    so it can be written every minute."""
+    with _history_lock:
+        data = {"fine": list(_history), "open": _bucket_open, "open_start": _bucket_start}
+        data = json.dumps(data, separators=(",", ":"))
+    tmp = HISTORY_LIVE_FILE + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(data)
+        os.replace(tmp, HISTORY_LIVE_FILE)
+    except Exception as exc:
+        log(f"[history] Failed to save {HISTORY_LIVE_FILE}: {exc}")
+
 
 def save_history():
     """Atomically persist the closed buckets. Called once per closed bucket (every 5 min),
@@ -619,6 +668,7 @@ def alert_loop():
     the status loop, which appends downtime episodes to the same list."""
     pending = {m: 0 for m in ALERT_RULES}
     cores = psutil.cpu_count() or 1
+    n = 0
     while True:
         time.sleep(ALERT_INTERVAL)
         try:
@@ -632,6 +682,9 @@ def alert_loop():
                 save_history()
             if _step_alerts(sample, now, cores, pending):
                 save_alerts()
+            n += 1
+            if n % HISTORY_LIVE_EVERY == 0:
+                save_history_live()
         except Exception as exc:
             log(f"[alerts] loop error: {exc}")
 
@@ -1397,7 +1450,17 @@ if __name__ == "__main__":
     threading.Thread(target=energy_loop, daemon=True).start()
     threading.Thread(target=alert_loop, daemon=True).start()
 
+    # AdminPanel and `kill` stop us with SIGTERM - route it through the same path as
+    # Ctrl-C so the history and open episodes are written before exiting.
+    def _on_sigterm(*_):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, _on_sigterm)
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopped.")
+        log("\nStopped.")
+    finally:
+        save_history_live()
+        save_history()
+        save_alerts()
