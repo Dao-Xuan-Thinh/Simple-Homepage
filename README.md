@@ -130,7 +130,7 @@ untick to forget it immediately).
 3. **Live Stats**: Dashboard polls `/api/stats` every ~5 seconds → CPU, RAM, disk, temp updated
 4. **Logs**: Log viewer polls `/api/logs` every 10 seconds → real-time Docker logs displayed
 5. **Alerts**: A server background loop samples metrics every ~20s and records overload episodes to `alerts.json`; the dashboard polls `/api/alerts` every ~30s to show the history
-6. **History**: The same loop records every sample into a fine in-memory ring (~1h) and 5-minute min/avg/max buckets persisted to `history.json` (7 days). The dashboard fetches `/api/history` on load for the 30-minute sparklines and on demand for the expanded 6h/24h views
+6. **History**: The same loop records every sample into a fine in-memory ring (~1h) and 5-minute min/avg/max buckets persisted to `history.json` (7 days). The dashboard fetches `/api/history` on load for the 30-minute sparklines and on demand for the expanded 6h/24h/7d views
 7. **Config Changes**: User saves settings → `PUT /api/config` → server writes `config.json` → services re-rendered
 
 ---
@@ -423,6 +423,7 @@ Windows of 60 minutes or less return `fine`; longer windows return `bucket`.
 
 **Query Parameters:**
 - `minutes`: How far back to return samples (default 30, max 10080 = 7 days)
+- `step`: Bucket tier only — merge 5-minute buckets into groups of this many seconds (the 7-day view uses 1800)
 
 **Response:**
 ```json

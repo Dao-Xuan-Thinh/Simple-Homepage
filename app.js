@@ -853,6 +853,7 @@ const METRIC_VIEWS = {
 const metricOverlay = document.getElementById('metric-overlay');
 let _metricView = null;      // the METRIC_VIEWS entry currently open
 let _metricRange = 30;       // window in minutes
+let _metricLoad = 0;         // bumps per load, so a slow older response can't overwrite a newer tab
 
 function openMetric(metric) {
   const view = METRIC_VIEWS[metric];
@@ -885,15 +886,20 @@ async function loadMetricRange() {
   const chart = document.getElementById('metric-chart');
   if (!view || !chart) return;
   chart.innerHTML = '<div class="metric-loading">Loading…</div>';
+  const load = ++_metricLoad;
 
-  const data = await apiFetch(`/api/history?minutes=${_metricRange}`);
+  // Past a day, 5-minute buckets are several per pixel; ask the server for 30-minute ones.
+  const step = _metricRange > 1440 ? '&step=1800' : '';
+  const data = await apiFetch(`/api/history?minutes=${_metricRange}${step}`);
+  if (load !== _metricLoad || view !== _metricView) return;
   if (!data || !Array.isArray(data.points) || data.points.length < 2) {
     chart.innerHTML = '<div class="metric-loading">Not enough history for this window yet.</div>';
     document.getElementById('metric-figures').innerHTML = '';
     return;
   }
 
-  const bucketed = data.res === 'bucket';
+  // Seconds each bucketed point spans (0 for raw samples): 300, or 1800 for 7 days.
+  const bucketS = data.res === 'bucket' ? (data.interval || 300) : 0;
   const pick = (p, k) => {
     const raw = p[k];
     if (raw == null) return null;
@@ -901,16 +907,18 @@ async function loadMetricRange() {
   };
 
   if (view.mirrored) {
-    renderBigNetChart(chart, data.points, pick, bucketed);
+    renderBigNetChart(chart, data.points, pick, bucketS);
   } else {
-    renderBigChart(chart, data.points, view.key, pick, bucketed);
+    renderBigChart(chart, data.points, view.key, pick, bucketS);
   }
+  renderCoverageNote(chart, data.points, bucketS || data.interval, _metricRange);
   renderMetricFigures(data.points, view, pick);
   renderMetricDetail(view);
   renderMetricAlerts(view, data.points[0].t);
 }
 
-function renderBigChart(chart, points, key, pick, bucketed) {
+function renderBigChart(chart, points, key, pick, bucketS) {
+  const bucketed = bucketS > 0;
   const series = points.map(p => ({ t: p.t, s: pick(p, key) })).filter(p => p.s);
   if (series.length < 2) {
     chart.innerHTML = '<div class="metric-loading">No data for this metric in this window.</div>';
@@ -937,6 +945,7 @@ function renderBigChart(chart, points, key, pick, bucketed) {
 
   const x = t => ((t - t0) / span) * W;
   const y = v => H - ((v - lo) / (hi - lo)) * H;
+  const days = dayMarks(t0, t1, x, W, H);
   const line = series.map(p => `${x(p.t).toFixed(1)},${y(p.s.avg).toFixed(1)}`).join(' ');
   const area = `${x(t0).toFixed(1)},${H} ${line} ${x(t1).toFixed(1)},${H}`;
 
@@ -951,19 +960,18 @@ function renderBigChart(chart, points, key, pick, bucketed) {
   chart.innerHTML =
     `<div class="chart-box">` +
       `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
-        band +
+        days.lines + band +
         `<polygon class="spark-area" points="${area}"></polygon>` +
         `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>` +
       `</svg>` +
       `<span class="axis-hi">${cfg.fmt(hi)}</span>` +
-      `<span class="axis-lo">${cfg.fmt(lo)}</span>` +
-    `</div>` +
-    `<div class="chart-times"><span>${alertClock(t0)}</span><span>${alertClock(t1)}</span></div>` +
-    (bucketed ? '<div class="chart-note">Shaded band = min–max within each 5-minute bucket</div>' : '');
+      `<span class="axis-lo">${cfg.fmt(lo)}</span>` + days.labels +
+    `</div>` + chartTimes(t0, t1) +
+    (bucketed ? `<div class="chart-note">Shaded band = min–max within each ${bucketLabel(bucketS)} bucket</div>` : '');
 
   attachChartHover(chart.querySelector('.chart-box'), series.map(p => ({
     x: x(p.t),
-    when: hoverWhen(p.t, bucketed),
+    when: hoverWhen(p.t, bucketS),
     marks: [{
       cls: '', y: y(p.s.avg), value: cfg.fmt(p.s.avg), label: bucketed ? 'avg' : '',
       range: bucketed ? hoverRange(cfg.fmt, p.s) : '',
@@ -971,7 +979,8 @@ function renderBigChart(chart, points, key, pick, bucketed) {
   })), W, H);
 }
 
-function renderBigNetChart(chart, points, pick, bucketed) {
+function renderBigNetChart(chart, points, pick, bucketS) {
+  const bucketed = bucketS > 0;
   const rx = points.map(p => ({ t: p.t, s: pick(p, 'net_rx') })).filter(p => p.s);
   const tx = points.map(p => ({ t: p.t, s: pick(p, 'net_tx') })).filter(p => p.s);
   if (rx.length < 2 && tx.length < 2) {
@@ -987,6 +996,7 @@ function renderBigNetChart(chart, points, pick, bucketed) {
   const scale = Math.max(peakRx, peakTx, 1);
 
   const x = t => ((t - t0) / span) * W;
+  const days = dayMarks(t0, t1, x, W, H);
   // dir +1 draws upward from the midline, -1 downward.
   const yAt = (v, dir) => MID - dir * (v / scale) * (MID - 1);
   const trace = (pts, dir) => {
@@ -1001,14 +1011,14 @@ function renderBigNetChart(chart, points, pick, bucketed) {
   chart.innerHTML =
     `<div class="chart-box">` +
       `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
+        days.lines +
         `<g class="net-rx">${trace(rx, 1)}</g>` +
         `<g class="net-tx">${trace(tx, -1)}</g>` +
         `<line class="spark-mid" x1="0" y1="${MID}" x2="${W}" y2="${MID}" vector-effect="non-scaling-stroke"></line>` +
       `</svg>` +
       `<span class="axis-hi">↓ ${fmtRate(peakRx)}</span>` +
-      `<span class="axis-lo">↑ ${fmtRate(peakTx)}</span>` +
-    `</div>` +
-    `<div class="chart-times"><span>${alertClock(t0)}</span><span>${alertClock(t1)}</span></div>`;
+      `<span class="axis-lo">↑ ${fmtRate(peakTx)}</span>` + days.labels +
+    `</div>` + chartTimes(t0, t1);
 
   const mark = (s, dir, cls, label) => s && {
     cls, label, y: yAt(s.avg, dir), value: fmtRate(s.avg),
@@ -1017,7 +1027,7 @@ function renderBigNetChart(chart, points, pick, bucketed) {
   attachChartHover(chart.querySelector('.chart-box'), points.map(p => {
     const marks = [mark(pick(p, 'net_rx'), 1, 'net-rx', '↓ down'),
                    mark(pick(p, 'net_tx'), -1, 'net-tx', '↑ up')].filter(Boolean);
-    return marks.length && { x: x(p.t), when: hoverWhen(p.t, bucketed), marks };
+    return marks.length && { x: x(p.t), when: hoverWhen(p.t, bucketS), marks };
   }).filter(Boolean), W, H);
 }
 
@@ -1027,12 +1037,56 @@ function renderBigNetChart(chart, points, pick, bucketed) {
    (preserveAspectRatio="none"), so the overlay is plain HTML placed in
    percentages of the viewBox rather than drawn inside the SVG. Each stop is
    { x, when, marks: [{ cls, y, value, label, range }] } in viewBox units. */
-const BUCKET_S = 300;  // the server's BUCKET_SECONDS: one bucketed point spans this long
-
-function hoverWhen(t, bucketed) {
+function hoverWhen(t, bucketS) {
   const day = alertSameDay(t) ? '' : alertDate(t) + ' ';
-  if (bucketed) return `${day}${alertClock(t)} – ${alertClock(t + BUCKET_S)}`;
+  if (bucketS) return `${day}${alertClock(t)} – ${alertClock(t + bucketS)}`;
   return day + new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// "5-minute", "30-minute", "1-hour" - how long one bucketed point spans.
+function bucketLabel(sec) {
+  return sec % 3600 === 0 ? `${sec / 3600}-hour` : `${Math.round(sec / 60)}-minute`;
+}
+
+// Start / end labels under a chart; the date is added once the window spans days.
+function chartTimes(t0, t1) {
+  const multiDay = new Date(t0 * 1000).toDateString() !== new Date(t1 * 1000).toDateString();
+  const lbl = t => multiDay ? `${alertDate(t)} ${alertClock(t)}` : alertClock(t);
+  return `<div class="chart-times"><span>${lbl(t0)}</span><span>${lbl(t1)}</span></div>`;
+}
+
+// A faint line at each local midnight inside the window, labelled with the day it
+// starts, so the longer views can be read day by day. Labels too close to either
+// edge are dropped so they don't sit on the axis labels or run out of the box.
+function dayMarks(t0, t1, x, W, H) {
+  let lines = '', labels = '';
+  const d = new Date(t0 * 1000);
+  d.setHours(24, 0, 0, 0);
+  for (; d.getTime() / 1000 < t1; d.setDate(d.getDate() + 1)) {
+    const vx = x(d.getTime() / 1000);
+    lines += `<line class="chart-day" x1="${vx.toFixed(1)}" y1="0" x2="${vx.toFixed(1)}" y2="${H}" vector-effect="non-scaling-stroke"></line>`;
+    const pct = (vx / W) * 100;
+    if (pct > 12 && pct < 92) {
+      const name = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+      labels += `<span class="chart-day-label" style="left:${pct.toFixed(2)}%">${name}</span>`;
+    }
+  }
+  return { lines, labels };
+}
+
+// When the server holds less history than the tab asks for (it was offline, or only
+// recently started recording), the chart spans what exists - say so rather than let
+// "7d" quietly show three hours.
+function renderCoverageNote(chart, points, interval, minutes) {
+  if (!chart.querySelector('.chart-box')) return;
+  const have = points[points.length - 1].t - points[0].t + interval;
+  if (have >= minutes * 60 * 0.95) return;
+  const h = have / 3600;
+  const amount = h >= 48 ? `${(h / 24).toFixed(1)} days` : h >= 1 ? `${h.toFixed(1)} h` : `${Math.round(have / 60)} min`;
+  const note = document.createElement('div');
+  note.className = 'chart-note';
+  note.textContent = `Only ${amount} of history recorded so far for this window.`;
+  chart.append(note);
 }
 
 // "min – max" for a bucket, or nothing when both ends format the same.
@@ -1177,7 +1231,7 @@ function renderMetricAlerts(view, windowStart) {
       hits.slice(0, 5).map(e =>
         `<div class="ma-row"><span class="al-level ${e.level}">${e.level === 'critical' ? 'crit' : 'warn'}</span>` +
         `<span>peak ${escapeHtml(e.peak + (e.unit || ''))}</span>` +
-        `<span class="al-when">${alertClock(e.started_at)}</span></div>`).join('')
+        `<span class="al-when">${alertSameDay(e.started_at) ? '' : alertDate(e.started_at) + ' '}${alertClock(e.started_at)}</span></div>`).join('')
     : '<div class="metric-alerts-title muted">No alerts for this metric in this window</div>';
 }
 

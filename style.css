@@ -1918,6 +1918,24 @@ body[data-skin="paper"] .card:hover { box-shadow: none; }
 .axis-hi { top: 4px; }
 .axis-lo { bottom: 4px; }
 
+/* Local-midnight markers on the multi-day views (see dayMarks) */
+.chart-day {
+  stroke: color-mix(in srgb, var(--text-muted) 45%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  shape-rendering: crispEdges;
+}
+.chart-day-label {
+  position: absolute;
+  bottom: 4px;
+  margin-left: 4px;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 .chart-times {
   display: flex;
   justify-content: space-between;

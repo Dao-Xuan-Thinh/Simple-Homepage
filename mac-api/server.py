@@ -16,7 +16,7 @@ Endpoints:
     GET  /api/config                          - full project/service config (read)
     PUT  /api/config?token=<WRITE_TOKEN>      - update config (write, requires write token)
     GET  /api/alerts?limit=100                - overload event log (stats that went dangerously high)
-    GET  /api/history?minutes=30              - metric history (fine samples / 5-min buckets)
+    GET  /api/history?minutes=30[&step=1800]  - metric history (fine samples / 5-min buckets)
     GET  /api/logs?service=<id>&lines=50      - last N log lines
 
 CORS is pre-configured for dao-xuan-thinh.github.io and localhost.
@@ -161,7 +161,7 @@ _alerts_lock   = threading.Lock()
 #            history-live.json every HISTORY_LIVE_EVERY samples, together with the bucket
 #            still filling, so a restart only loses the last minute or so.
 #   bucket - 5-minute min/avg/max aggregates, persisted to history.json, 7 days. Backs the
-#            expanded card views (6 h / 24 h) and the disk-usage trend projection.
+#            expanded card views (6 h / 24 h / 7 d) and the disk-usage trend projection.
 # Both files are also written on a clean stop (SIGTERM / Ctrl-C).
 HISTORY_MAX     = 200    # fine samples kept; at ALERT_INTERVAL=20 s that's ~66 min
 BUCKET_SECONDS  = 300    # 5-minute aggregation buckets
@@ -637,6 +637,36 @@ def _close_bucket():
         _buckets.append(agg)
         return True
     return False
+
+
+def _coarsen(buckets, step):
+    """Merge consecutive 5-minute buckets into step-second groups (min of mins, max of
+    maxes, mean of avgs), aligned to wall-clock step boundaries. A 7-day window is 2016
+    buckets - far more points than a chart is wide - so long views ask for e.g. 30 min."""
+    out, cur, slot = [], {}, None
+
+    def flush():
+        agg = {"t": slot}
+        for metric, parts in cur.items():
+            agg[metric] = {
+                "min": min(p["min"] for p in parts),
+                "avg": round(sum(p["avg"] for p in parts) / len(parts), 2),
+                "max": max(p["max"] for p in parts),
+            }
+        out.append(agg)
+
+    for b in buckets:
+        s = b["t"] - (b["t"] % step)
+        if s != slot:
+            if cur:
+                flush()
+            cur, slot = {}, s
+        for metric, val in b.items():
+            if metric != "t" and isinstance(val, dict):
+                cur.setdefault(metric, []).append(val)
+    if cur:
+        flush()
+    return out
 
 
 def _history_push(sample, now):
@@ -1364,6 +1394,11 @@ class Handler(BaseHTTPRequestHandler):
                     with _history_lock:
                         points = [b for b in _buckets if b["t"] >= cutoff]
                     res, interval = "bucket", BUCKET_SECONDS
+                    # Optional coarser buckets: a whole multiple of BUCKET_SECONDS, max 1 day.
+                    step = int(qs.get("step", [str(BUCKET_SECONDS)])[0])
+                    step = max(1, min(step // BUCKET_SECONDS, 288)) * BUCKET_SECONDS
+                    if step > BUCKET_SECONDS:
+                        points, interval = _coarsen(points, step), step
                 json_response(self, {
                     "points": points, "res": res, "interval": interval,
                     "minutes": minutes, "ts": int(time.time()),

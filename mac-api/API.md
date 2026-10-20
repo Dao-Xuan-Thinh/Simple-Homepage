@@ -534,7 +534,7 @@ window instead of drawing itself in from nothing. Fed by the same background loo
 | Tier | Resolution | Retention | Storage | Used for |
 |------|-----------|-----------|---------|----------|
 | `fine` | every sample (~20 s) | last 200 samples (~66 min) | `history-live.json`, saved every ~60 s | the 30-minute card sparklines |
-| `bucket` | 5-minute `min`/`avg`/`max` | 7 days (2016 buckets) | `history.json` | the 6 h / 24 h expanded views and the disk-fill projection |
+| `bucket` | 5-minute `min`/`avg`/`max` | 7 days (2016 buckets) | `history.json` | the 6 h / 24 h / 7 d expanded views and the disk-fill projection |
 
 `history-live.json` also holds the 5-minute bucket still filling. Both files are written on a clean
 stop (SIGTERM / Ctrl-C), so a restart loses at most the last minute of samples.
@@ -542,13 +542,14 @@ stop (SIGTERM / Ctrl-C), so a restart loses at most the last minute of samples.
 The tier is chosen from the requested window: **≤ 60 minutes returns `fine`, anything longer returns
 `bucket`**. The two have *different point shapes*, so always branch on `res`.
 
-**URL**: `/api/history?minutes=30&token=<TOKEN>`
+**URL**: `/api/history?minutes=30&token=<TOKEN>` (7-day view: `minutes=10080&step=1800`)
 
 **Query Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `minutes` | int | 30 | How far back to return samples (1–10080, i.e. up to 7 days) |
+| `step` | int | 300 | `bucket` tier only: merge buckets into groups of this many seconds (rounded down to a multiple of 300, max 86400). Each group is min of mins, max of maxes, mean of avgs, aligned to wall-clock boundaries. Ignored for `fine` |
 | `token` | string | (required) | API read token |
 
 **Response — `fine` (200 OK):** scalar values.
@@ -586,7 +587,7 @@ The tier is chosen from the requested window: **≤ 60 minutes returns `fine`, a
 |-------|------|-------------|
 | `points` | array | Samples/buckets, **oldest first**. `t` is Unix epoch (s); for buckets it is the start of the 5-minute slot, aligned to wall-clock boundaries |
 | `res` | string | `"fine"` (scalar values) or `"bucket"` (min/avg/max objects) |
-| `interval` | int | Nominal seconds per point (20 for `fine`, 300 for `bucket`) |
+| `interval` | int | Nominal seconds per point (20 for `fine`, 300 for `bucket`, or `step` when one was given) |
 | `minutes` | int | The window actually applied (after clamping) |
 
 Metric keys match `/api/alerts` (`cpu`, `ram`, `swap`, `temp`, `load`, `disk`) plus `power` (watts,
