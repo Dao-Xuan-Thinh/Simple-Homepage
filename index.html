@@ -66,13 +66,20 @@
       </div>
     </section>
 
-    <!-- ── Mac Mini Status ───────────────────────────────────── -->
+    <!-- ── Machine Status (one tab per machine) ────────────────── -->
     <section class="section">
       <h2 class="section-title">
-        <span class="section-icon">▤</span> Mac Mini Status
-        <span class="badge badge-mock" id="badge-mac">Connecting…</span>
+        <span class="section-icon">▤</span> Status
+        <span class="machine-tabs" role="tablist" aria-label="Machine">
+          <button class="machine-tab active" role="tab" aria-selected="true" data-machine="mac"
+                  aria-controls="machine-mac">Mac mini <span class="tab-dot" id="dot-mac"></span></button>
+          <button class="machine-tab" role="tab" aria-selected="false" data-machine="laptop"
+                  aria-controls="machine-laptop">Laptop <span class="tab-dot" id="dot-laptop"></span></button>
+        </span>
+        <span class="badge badge-mock" id="badge-mac" data-machine-badge="mac">Connecting…</span>
+        <span class="badge badge-mock" id="badge-laptop" data-machine-badge="laptop" hidden>Connecting…</span>
       </h2>
-      <div class="cards-grid stats-grid">
+      <div class="cards-grid stats-grid" id="machine-mac" role="tabpanel" data-machine-panel="mac">
 
         <!-- Processing -->
         <div class="card stat-card" data-metric="cpu" data-expand="cpu">
@@ -163,6 +170,83 @@
           <div class="volumes-list" id="volumes-list">
             <div class="stat-sub">—</div>
           </div>
+        </div>
+
+      </div>
+
+      <!-- Laptop: pushed by laptop-agent/agent.py through the same API (see /api/laptop) -->
+      <div class="cards-grid stats-grid" id="machine-laptop" role="tabpanel" data-machine-panel="laptop" hidden>
+
+        <div class="card stat-card" data-metric="cpu" data-expand="cpu" data-host="laptop">
+          <div class="stat-label">CPU Usage</div>
+          <div class="stat-value" id="lt-cpu">—</div>
+          <div class="stat-bar-wrap"><div class="stat-bar" id="lt-bar-cpu"></div></div>
+          <div class="stat-sub" id="lt-cpu-sub"></div>
+          <span class="spark" id="lt-spark-cpu"></span>
+        </div>
+
+        <div class="card stat-card" data-metric="ram" data-expand="ram" data-host="laptop">
+          <div class="stat-label">RAM Usage</div>
+          <div class="stat-value" id="lt-ram">—</div>
+          <div class="stat-bar-wrap"><div class="stat-bar" id="lt-bar-ram"></div></div>
+          <div class="stat-sub" id="lt-ram-sub"></div>
+          <span class="spark" id="lt-spark-ram"></span>
+        </div>
+
+        <div class="card stat-card" data-metric="battery" data-expand="battery" data-host="laptop">
+          <div class="stat-label">Battery</div>
+          <div class="stat-value" id="lt-battery">—</div>
+          <div class="stat-bar-wrap"><div class="stat-bar" id="lt-bar-battery"></div></div>
+          <div class="stat-sub" id="lt-battery-sub"></div>
+          <span class="spark" id="lt-spark-battery"></span>
+        </div>
+
+        <div class="card stat-card" data-metric="power" data-expand="power" data-host="laptop">
+          <div class="stat-label">Battery Drain</div>
+          <div class="stat-value" id="lt-power">—</div>
+          <div class="stat-sub" id="lt-power-sub">watts drawn from the battery</div>
+          <span class="spark" id="lt-spark-power"></span>
+        </div>
+
+        <div class="card stat-card" data-metric="temp" data-expand="temp" data-host="laptop">
+          <div class="stat-label">Thermal</div>
+          <div class="stat-value" id="lt-temp">—</div>
+          <div class="stat-sub">hottest ACPI thermal zone</div>
+          <span class="spark" id="lt-spark-temp"></span>
+        </div>
+
+        <div class="card stat-card" data-metric="net" data-expand="net" data-host="laptop">
+          <div class="stat-label">Network</div>
+          <div class="stat-value" id="lt-net">—</div>
+          <div class="stat-sub">↑ Upload &nbsp;↓ Download (KB/s)</div>
+          <span class="spark mirrored" id="lt-spark-net"></span>
+        </div>
+
+        <div class="card stat-card" data-metric="disk" data-expand="disk" data-host="laptop">
+          <div class="stat-label">Storage</div>
+          <div class="stat-value" id="lt-disk">—</div>
+          <div class="stat-bar-wrap"><div class="stat-bar" id="lt-bar-disk"></div></div>
+          <div class="stat-sub" id="lt-disk-sub"></div>
+          <span class="spark" id="lt-spark-disk"></span>
+        </div>
+
+        <!-- Top apps (full width) -->
+        <div class="card stat-card apps-card" data-metric="cpu">
+          <div class="apps-head">
+            <div class="stat-label">Top Apps</div>
+            <div class="metric-ranges apps-ranges" id="lt-app-ranges" role="tablist" aria-label="Window">
+              <button class="range-btn active" data-minutes="0" role="tab">Now</button>
+              <button class="range-btn" data-minutes="60" role="tab">1h</button>
+              <button class="range-btn" data-minutes="1440" role="tab">24h</button>
+              <button class="range-btn" data-minutes="10080" role="tab">7d</button>
+            </div>
+            <div class="metric-ranges apps-sort" id="lt-app-sort" role="tablist" aria-label="Sort by">
+              <button class="range-btn active" data-sort="cpu" role="tab">CPU</button>
+              <button class="range-btn" data-sort="ram" role="tab">RAM</button>
+            </div>
+          </div>
+          <div class="apps-list" id="lt-apps"><div class="stat-sub">—</div></div>
+          <div class="stat-sub" id="lt-apps-note"></div>
         </div>
 
       </div>

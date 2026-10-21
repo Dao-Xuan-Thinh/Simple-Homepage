@@ -424,6 +424,7 @@ body.dark .download-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
 .stat-card[data-metric="net"]    { --m: var(--m-net); }
 .stat-card[data-metric="docker"] { --m: var(--m-docker); }
 .stat-card[data-metric="uptime"] { --m: var(--m-uptime); }
+.stat-card[data-metric="battery"] { --m: var(--m-battery); }
 
 .stat-label {
   font-size: 0.72rem;
@@ -514,6 +515,79 @@ body.dark .download-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
   border-radius: 4px;
   background: var(--bar-bg);
   color: var(--text-muted);
+}
+
+/* ── Machine tabs (Status section: one panel per machine) ──────── */
+/* on body, where the theme and skins set --m-load, so the alias follows them */
+body { --m-battery: var(--m-load); }
+.section-title:has(.machine-tabs) { flex-wrap: wrap; row-gap: 0.4rem; }
+.machine-tabs { display: inline-flex; gap: 0.3rem; }
+.machine-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 0.22rem 0.65rem;
+  background: var(--bg-alt);
+  color: var(--text-muted);
+  border: 1px solid var(--card-border);
+  border-radius: var(--pill);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.machine-tab:hover { color: var(--text); }
+.machine-tab.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.machine-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); opacity: 0.5; }
+.tab-dot.online  { background: var(--online);  opacity: 1; }
+.tab-dot.offline { background: var(--offline); opacity: 1; }
+/* .cards-grid sets display:grid, which would otherwise beat the hidden attribute */
+[data-machine-panel][hidden] { display: none !important; }
+
+/* Laptop asleep or away: keep its last values on screen, visibly not live */
+.stats-grid.stale .stat-value,
+.stats-grid.stale .spark { opacity: 0.45; }
+
+/* ── Top apps (laptop) ─────────────────────────────────────────── */
+.apps-card { grid-column: 1 / -1; }
+.apps-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; }
+.apps-head .stat-label { margin-right: auto; }
+.apps-head .metric-ranges { margin-bottom: 0; }
+.apps-list { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.3rem; }
+.app-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 0.9rem;
+  font-size: 0.8rem;
+}
+.app-head { font-size: 0.66rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.app-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.app-cell { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.app-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--bar-bg); overflow: hidden; }
+.app-bar i { display: block; height: 100%; border-radius: 3px; }
+.app-bar.cpu i { background: var(--m-cpu); }
+.app-bar.ram i { background: var(--m-ram); }
+.app-val {
+  flex: 0 0 4.2rem;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 640px) {
+  .app-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.25rem 0.8rem; }
+  .app-row .app-name { grid-column: 1 / -1; }
+  .app-head > span:first-child { display: none; }
 }
 
 /* ── Server Status ─────────────────────────────────────────────── */

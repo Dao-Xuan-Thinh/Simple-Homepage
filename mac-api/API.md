@@ -22,6 +22,9 @@ Complete reference for the Mac Mini Stats API.
    - [GET /api/docker](#get-apidocker)
    - [GET /api/alerts](#get-apialerts)
    - [GET /api/history](#get-apihistory)
+   - [GET /api/laptop](#get-apilaptop)
+   - [GET /api/laptop/apps](#get-apilaptopapps)
+   - [POST /api/laptop/push](#post-apilaptoppush)
    - [GET /api/logs](#get-apilogs)
 5. [Response Formats](#response-formats)
 6. [Examples](#examples)
@@ -42,6 +45,7 @@ GET /api/stats?token=3df484b5a0a1fd711ba4438c1c6d8b79cc66444375e0da80
 |-------|---------|--------|-------------------|
 | **Read Token** | Query stats, config, logs | Generated on server start | `app.js` (public) |
 | **Write Token** | Modify config via PUT | `HOMEPAGE_WRITE_TOKEN` env var | User enters in settings modal |
+| **Push Token** | Laptop agent uploads (`POST /api/laptop/push`) | `laptop-token.txt` next to `server.py`, created on first start | `agent.json` on the laptop, sent as the `X-Push-Token` header |
 
 ### Missing or Invalid Token
 
@@ -550,6 +554,7 @@ The tier is chosen from the requested window: **≤ 60 minutes returns `fine`, a
 |-----------|------|---------|-------------|
 | `minutes` | int | 30 | How far back to return samples (1–10080, i.e. up to 7 days) |
 | `step` | int | 300 | `bucket` tier only: merge buckets into groups of this many seconds (rounded down to a multiple of 300, max 86400). Each group is min of mins, max of maxes, mean of avgs, aligned to wall-clock boundaries. Ignored for `fine` |
+| `host` | string | (Mac) | `laptop` returns the laptop's history instead (see [GET /api/laptop](#get-apilaptop)). Same tiers and shapes; its `fine` interval is 30 (the agent samples every 30 s on AC, 60 s on battery) and gaps are normal while it sleeps |
 | `token` | string | (required) | API read token |
 
 **Response — `fine` (200 OK):** scalar values.
@@ -599,6 +604,96 @@ sample after a restart, since a rate needs two readings.
 **Refresh Rate**: Fetch once on page load for the 30-minute window. The dashboard then extends the
 series live from `/api/stats`, re-fetching only after the tab has been backgrounded long enough to
 leave a gap. The bucketed windows are fetched on demand when a card is expanded.
+
+---
+
+### GET /api/laptop
+
+Status of the Windows laptop, which is not sampled by this server: `laptop-agent/agent.py` runs on
+the laptop and pushes batches to [POST /api/laptop/push](#post-apilaptoppush). Everything here is the
+laptop's own data, timestamped by the laptop.
+
+**URL**: `/api/laptop?token=<TOKEN>`
+
+**Response (200 OK):**
+
+```json
+{
+  "online": true,
+  "last_push": 1792605084,
+  "last": { "t": 1792605084, "cpu": 6.2, "ram": 48.1, "ram_used_gb": 14.97, "swap": 1.7,
+            "disk": 76.0, "temp": 57.1, "battery": 100, "plugged": 1, "net_rx": 6.3, "net_tx": 2.4 },
+  "info": { "hostname": "Shatter", "os": "Windows 11 (10.0.26200)",
+            "cpu_model": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M", "cpu_threads": 24, "cpu_cores": 12,
+            "ram_total_gb": 31.1, "boot_time": 1792314514, "agent_version": 1,
+            "volumes": [ { "name": "C:", "percent": 75.9, "free_gb": 158.9, "total_gb": 660.0 } ] },
+  "apps_now": { "t": 1792605084, "dt": 30,
+                "top": [ { "n": "msedgewebview2", "cpu": 1.86, "ram": 989 } ] },
+  "spark": [ { "t": 1792603300, "cpu": 5.1, "ram": 47.9 } ],
+  "ts": 1792605090
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `online` | A push arrived within the last 5 minutes. When `false` the laptop is asleep, off or away, and every other field is its last known state |
+| `last` | Newest sample. `cpu`/`ram`/`swap`/`disk`/`battery` are percentages; `temp` is the hottest ACPI thermal zone (°C); `net_rx`/`net_tx` KB/s. `power` (W drawn from the battery) is present only while discharging, `charge` (W into the battery) only while charging; the draw from the charger itself is not measurable. `secsleft` is Windows' battery estimate, on battery only |
+| `apps_now` | The latest per-app scan: `cpu` = % of the **whole** processor over the `dt` seconds since the previous scan (all of an app's processes summed), `ram` = private working set in MB (Task Manager's "Memory") |
+| `spark` | Fine samples covering the 30 minutes up to the newest one (not up to now), for the card graphs |
+
+Any field of a sample may be absent if the laptop couldn't read it.
+
+---
+
+### GET /api/laptop/apps
+
+Which apps used the most CPU and memory on the laptop over a window, from hourly totals kept for
+7 days in `laptop-apps.json`. Each scan from the agent carries the top 10 apps by CPU and by RAM;
+the server adds them into the hour they fall in.
+
+**URL**: `/api/laptop/apps?minutes=1440&token=<TOKEN>`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `minutes` | int | 1440 | Window, 60–10080. Rounded out to whole hours |
+
+**Response (200 OK):**
+
+```json
+{
+  "apps": [ { "n": "chrome", "cpu": 4.12, "ram_avg": 2210, "ram_max": 3105, "seen_s": 18240 } ],
+  "awake_s": 21600,
+  "minutes": 1440
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `cpu` | Average % of the whole processor while the laptop was awake in the window |
+| `ram_avg` / `ram_max` | Private working set in MB, averaged over / peak across the scans the app appeared in |
+| `seen_s` | Seconds the app was in a scan's top list |
+| `awake_s` | Seconds of scans in the window (the laptop's awake time) |
+
+At most the top 15 apps by CPU plus the top 15 by memory are returned, unsorted.
+
+---
+
+### POST /api/laptop/push
+
+Upload endpoint for the laptop agent. Authenticated by the **push token** in the `X-Push-Token`
+header (not the read token). Body (max 4 MB):
+
+```json
+{
+  "samples": [ { "t": 1792605084, "cpu": 6.2, "ram": 48.1, "battery": 100, "plugged": 1 } ],
+  "apps": [ { "t": 1792605084, "dt": 30, "top": [ { "n": "chrome", "cpu": 3.1, "ram": 2048 } ] } ],
+  "info": { "hostname": "Shatter" }
+}
+```
+
+Samples and scans already received (by timestamp) are skipped, so the agent can safely resend a batch
+whose reply it never got. Returns `{"ok": true, "message": "ok"}`, `400` for a malformed body, `401`
+for a wrong token.
 
 ---
 

@@ -631,6 +631,7 @@ const SPARK_CFG = {
   // Disk usage barely moves hour to hour; a tight band makes the drift legible,
   // which is the whole point of pairing it with the fill projection.
   disk:  { zero: false, minSpan: 4,  fmt: v => v.toFixed(1) + '%' },
+  battery: { zero: true, minTop: 100, fmt: v => Math.round(v) + '%' },
 };
 
 // The network pair is drawn as one mirrored graph (download up, upload down) in
@@ -689,13 +690,15 @@ document.addEventListener('visibilitychange', () => {
 
 // Shared window geometry: the x axis is anchored to "now" but never wider than the
 // data we actually have, so a short buffer fills the box rather than drawing a stub
-// against the right edge. Returns null when there isn't enough to plot.
-function sparkWindow(...bufs) {
+// against the right edge. `end` overrides "now" - a machine that has gone to sleep is
+// drawn up to its last sample instead of scrolling off the left. Returns null when
+// there isn't enough to plot.
+function sparkWindow(bufs, end) {
   const filled = bufs.filter(b => b && b.length);
   if (!filled.length) return null;
   const newest = Math.max(...filled.map(b => b[b.length - 1].t));
   const oldest = Math.min(...filled.map(b => b[0].t));
-  const now  = Math.max(Date.now() / 1000, newest);
+  const now  = end ?? Math.max(Date.now() / 1000, newest);
   const t0   = Math.max(oldest, now - SPARK_WINDOW_S);
   const span = Math.max(now - t0, 30);
   return { now, t0, span, x: t => ((t - t0) / span) * 300 };
@@ -705,10 +708,13 @@ function sparkWindow(...bufs) {
 // directions are comparable at a glance. The only metric where the two-direction
 // form is the right one — everything else reads better anchored at the bottom.
 function renderNetSpark() {
-  const el = document.getElementById('spark-net');
-  const rx = _sparks.net_rx, tx = _sparks.net_tx;
+  drawNetSparkInto(document.getElementById('spark-net'), _sparks.net_rx, _sparks.net_tx);
+}
+
+// opts: { end, gap } - see sparkWindow and splitGaps.
+function drawNetSparkInto(el, rx, tx, opts = {}) {
   if (!el || (rx.length < 2 && tx.length < 2)) return;
-  const win = sparkWindow(rx, tx);
+  const win = sparkWindow([rx, tx], opts.end);
   if (!win) return;
 
   const W = 300, H = 100, MID = H / 2;
@@ -719,14 +725,14 @@ function renderNetSpark() {
   const scale  = Math.max(peakRx, peakTx, 1);   // shared, and never divide by zero
 
   // dir +1 draws upward from the midline, -1 downward.
-  const trace = (pts, dir) => {
-    if (pts.length < 2) return '';
+  const trace = (pts, dir) => splitGaps(pts, opts.gap).map(seg => {
+    if (seg.length < 2) return '';
     const y = v => MID - dir * (v / scale) * (MID - 1);
-    const line = pts.map(p => `${win.x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
-    const area = `${win.x(pts[0].t).toFixed(1)},${MID} ${line} ${win.x(pts[pts.length - 1].t).toFixed(1)},${MID}`;
+    const line = seg.map(p => `${win.x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+    const area = `${win.x(seg[0].t).toFixed(1)},${MID} ${line} ${win.x(seg[seg.length - 1].t).toFixed(1)},${MID}`;
     return `<polygon class="spark-area" points="${area}"></polygon>` +
            `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>`;
-  };
+  }).join('');
 
   el.innerHTML =
     `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
@@ -742,13 +748,17 @@ function renderNetSpark() {
 
 function renderSpark(key) {
   if (NET_KEYS.includes(key)) return renderNetSpark();
-  const el  = document.getElementById('spark-' + key);
-  const buf = _sparks[key];
+  drawSparkInto(document.getElementById('spark-' + key), _sparks[key], key);
+}
+
+// Draws one {t, v} buffer into a card's .spark element, scaled per SPARK_CFG[key].
+// opts: { end, gap } - see sparkWindow and splitGaps.
+function drawSparkInto(el, buf, key, opts = {}) {
   if (!el || !buf || buf.length < 2) return;
   const cfg = SPARK_CFG[key] || { zero: true, minTop: 1, fmt: v => Math.round(v) };
   const W = 300, H = 100;
 
-  const win = sparkWindow(buf);
+  const win = sparkWindow([buf], opts.end);
   if (!win) return;
   const { now, t0 } = win;
   const pts = buf.filter(p => p.t >= t0);
@@ -775,7 +785,7 @@ function renderSpark(key) {
   const norm = v => (v - lo) / (hi - lo);   // 0..1, for forms that don't use SVG coords
 
   el.innerHTML =
-    drawSpark(chartStyle(), { pts, x, y, norm, W, H }) +
+    drawSpark(chartStyle(), { pts, x, y, norm, W, H, gap: opts.gap }) +
     `<span class="spark-peak">${cfg.fmt(peak)}</span>` +
     `<span class="spark-span">${fmtSparkSpan(now - t0)}</span>`;
 }
@@ -784,8 +794,21 @@ function renderSpark(key) {
    A skin doesn't just recolour the graph, it changes what kind of graph
    it is: filled area, bare stroke, discrete columns, or block characters
    rendered as text. Each form takes the same scaled geometry. */
+// Splits a time-ordered series wherever consecutive points are more than `gap` seconds
+// apart, so a machine that slept (or an API that was down) leaves a hole in the graph
+// instead of a straight line across it. No gap given = one segment.
+function splitGaps(pts, gap) {
+  if (!gap || pts.length < 2) return [pts];
+  const segs = [[pts[0]]];
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].t - pts[i - 1].t > gap) segs.push([]);
+    segs[segs.length - 1].push(pts[i]);
+  }
+  return segs;
+}
+
 function drawSpark(style, g) {
-  const { pts, x, y, norm, W, H } = g;
+  const { pts, x, y, norm, W, H, gap } = g;
 
   if (style === 'blocks') {
     // Text, not vectors: downsample to a fixed column count and map each to one
@@ -804,7 +827,6 @@ function drawSpark(style, g) {
     return `<span class="spark-blocks" aria-hidden="true">${out}</span>`;
   }
 
-  const line = pts.map(p => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
   const svg = inner =>
     `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${inner}</svg>`;
 
@@ -821,15 +843,21 @@ function drawSpark(style, g) {
     return svg(bars);
   }
 
+  const segs = splitGaps(pts, gap).filter(seg => seg.length > 1);
+  const lineOf = seg => seg.map(p => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+
   if (style === 'line') {
-    return svg(`<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>`);
+    return svg(segs.map(seg =>
+      `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${lineOf(seg)}"></polyline>`).join(''));
   }
 
   // 'area' (default)
-  const area = `${x(pts[0].t).toFixed(1)},${H} ${line} ${x(pts[pts.length - 1].t).toFixed(1)},${H}`;
-  return svg(
-    `<polygon class="spark-area" points="${area}"></polygon>` +
-    `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>`);
+  return svg(segs.map(seg => {
+    const l = lineOf(seg);
+    const area = `${x(seg[0].t).toFixed(1)},${H} ${l} ${x(seg[seg.length - 1].t).toFixed(1)},${H}`;
+    return `<polygon class="spark-area" points="${area}"></polygon>` +
+           `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${l}"></polyline>`;
+  }).join(''));
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -844,7 +872,8 @@ const METRIC_VIEWS = {
   // resizes its swap file, so the percentage is not something to alert on.
   swap:   { key: 'swap',   title: 'Swap', alertMetric: 'swap_gb' },
   temp:   { key: 'temp',   title: 'Thermal' },
-  power:  { key: 'power',  title: 'Power' },
+  power:  { key: 'power',  title: 'Power', laptopTitle: 'Battery Drain' },
+  battery:{ key: 'battery', title: 'Battery' },
   load:   { key: 'load',   title: 'Load Average' },
   disk:   { key: 'disk',   title: 'Storage' },
   net:    { key: 'net_rx', title: 'Network', mirrored: true },
@@ -852,17 +881,20 @@ const METRIC_VIEWS = {
 
 const metricOverlay = document.getElementById('metric-overlay');
 let _metricView = null;      // the METRIC_VIEWS entry currently open
+let _metricHost = 'mac';     // whose history: 'mac' or 'laptop'
 let _metricRange = 30;       // window in minutes
 let _metricLoad = 0;         // bumps per load, so a slow older response can't overwrite a newer tab
 
-function openMetric(metric) {
+function openMetric(metric, host = 'mac') {
   const view = METRIC_VIEWS[metric];
   if (!view || !metricOverlay) return;
   _metricView = view;
+  _metricHost = host;
   _metricRange = 30;
   // Colour the whole modal with the clicked card's metric accent.
   metricOverlay.style.setProperty('--m', `var(--m-${metric})`);
-  document.getElementById('metric-title').textContent = view.title;
+  document.getElementById('metric-title').textContent = host === 'laptop'
+    ? `Laptop · ${view.laptopTitle || view.title}` : view.title;
   document.querySelectorAll('#metric-ranges .range-btn').forEach(b => {
     b.classList.toggle('active', Number(b.dataset.minutes) === _metricRange);
   });
@@ -890,7 +922,8 @@ async function loadMetricRange() {
 
   // Past a day, 5-minute buckets are several per pixel; ask the server for 30-minute ones.
   const step = _metricRange > 1440 ? '&step=1800' : '';
-  const data = await apiFetch(`/api/history?minutes=${_metricRange}${step}`);
+  const host = _metricHost === 'laptop' ? '&host=laptop' : '';
+  const data = await apiFetch(`/api/history?minutes=${_metricRange}${step}${host}`);
   if (load !== _metricLoad || view !== _metricView) return;
   if (!data || !Array.isArray(data.points) || data.points.length < 2) {
     chart.innerHTML = '<div class="metric-loading">Not enough history for this window yet.</div>';
@@ -906,10 +939,12 @@ async function loadMetricRange() {
     return typeof raw === 'object' ? raw : { min: raw, avg: raw, max: raw };
   };
 
+  // Break the line where samples stop for a while (laptop asleep, API restarted).
+  const gap = (bucketS || data.interval || 20) * 3.5;
   if (view.mirrored) {
-    renderBigNetChart(chart, data.points, pick, bucketS);
+    renderBigNetChart(chart, data.points, pick, bucketS, gap);
   } else {
-    renderBigChart(chart, data.points, view.key, pick, bucketS);
+    renderBigChart(chart, data.points, view.key, pick, bucketS, gap);
   }
   renderCoverageNote(chart, data.points, bucketS || data.interval, _metricRange);
   renderMetricFigures(data.points, view, pick);
@@ -917,7 +952,7 @@ async function loadMetricRange() {
   renderMetricAlerts(view, data.points[0].t);
 }
 
-function renderBigChart(chart, points, key, pick, bucketS) {
+function renderBigChart(chart, points, key, pick, bucketS, gap) {
   const bucketed = bucketS > 0;
   const series = points.map(p => ({ t: p.t, s: pick(p, key) })).filter(p => p.s);
   if (series.length < 2) {
@@ -946,23 +981,26 @@ function renderBigChart(chart, points, key, pick, bucketS) {
   const x = t => ((t - t0) / span) * W;
   const y = v => H - ((v - lo) / (hi - lo)) * H;
   const days = dayMarks(t0, t1, x, W, H);
-  const line = series.map(p => `${x(p.t).toFixed(1)},${y(p.s.avg).toFixed(1)}`).join(' ');
-  const area = `${x(t0).toFixed(1)},${H} ${line} ${x(t1).toFixed(1)},${H}`;
-
-  // min–max envelope: forward along the maxima, back along the minima.
-  let band = '';
-  if (bucketed) {
-    const up = series.map(p => `${x(p.t).toFixed(1)},${y(p.s.max).toFixed(1)}`);
-    const dn = series.slice().reverse().map(p => `${x(p.t).toFixed(1)},${y(p.s.min).toFixed(1)}`);
-    band = `<polygon class="chart-band" points="${up.concat(dn).join(' ')}"></polygon>`;
+  const pt = (p, v) => `${x(p.t).toFixed(1)},${y(v).toFixed(1)}`;
+  let band = '', traces = '';
+  for (const seg of splitGaps(series, gap)) {
+    if (seg.length < 2) continue;
+    const line = seg.map(p => pt(p, p.s.avg)).join(' ');
+    const area = `${x(seg[0].t).toFixed(1)},${H} ${line} ${x(seg[seg.length - 1].t).toFixed(1)},${H}`;
+    // min–max envelope: forward along the maxima, back along the minima.
+    if (bucketed) {
+      const up = seg.map(p => pt(p, p.s.max));
+      const dn = seg.slice().reverse().map(p => pt(p, p.s.min));
+      band += `<polygon class="chart-band" points="${up.concat(dn).join(' ')}"></polygon>`;
+    }
+    traces += `<polygon class="spark-area" points="${area}"></polygon>` +
+              `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>`;
   }
 
   chart.innerHTML =
     `<div class="chart-box">` +
       `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
-        days.lines + band +
-        `<polygon class="spark-area" points="${area}"></polygon>` +
-        `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>` +
+        days.lines + band + traces +
       `</svg>` +
       `<span class="axis-hi">${cfg.fmt(hi)}</span>` +
       `<span class="axis-lo">${cfg.fmt(lo)}</span>` + days.labels +
@@ -979,7 +1017,7 @@ function renderBigChart(chart, points, key, pick, bucketS) {
   })), W, H);
 }
 
-function renderBigNetChart(chart, points, pick, bucketS) {
+function renderBigNetChart(chart, points, pick, bucketS, gap) {
   const bucketed = bucketS > 0;
   const rx = points.map(p => ({ t: p.t, s: pick(p, 'net_rx') })).filter(p => p.s);
   const tx = points.map(p => ({ t: p.t, s: pick(p, 'net_tx') })).filter(p => p.s);
@@ -999,14 +1037,14 @@ function renderBigNetChart(chart, points, pick, bucketS) {
   const days = dayMarks(t0, t1, x, W, H);
   // dir +1 draws upward from the midline, -1 downward.
   const yAt = (v, dir) => MID - dir * (v / scale) * (MID - 1);
-  const trace = (pts, dir) => {
-    if (pts.length < 2) return '';
+  const trace = (pts, dir) => splitGaps(pts, gap).map(seg => {
+    if (seg.length < 2) return '';
     const y = v => yAt(v, dir);
-    const line = pts.map(p => `${x(p.t).toFixed(1)},${y(p.s.avg).toFixed(1)}`).join(' ');
-    const area = `${x(pts[0].t).toFixed(1)},${MID} ${line} ${x(pts[pts.length - 1].t).toFixed(1)},${MID}`;
+    const line = seg.map(p => `${x(p.t).toFixed(1)},${y(p.s.avg).toFixed(1)}`).join(' ');
+    const area = `${x(seg[0].t).toFixed(1)},${MID} ${line} ${x(seg[seg.length - 1].t).toFixed(1)},${MID}`;
     return `<polygon class="spark-area" points="${area}"></polygon>` +
            `<polyline class="spark-line" vector-effect="non-scaling-stroke" points="${line}"></polyline>`;
-  };
+  }).join('');
 
   chart.innerHTML =
     `<div class="chart-box">` +
@@ -1205,7 +1243,15 @@ function renderMetricDetail(view) {
   const box = document.getElementById('metric-detail');
   if (!box) return;
   const txt = id => (document.getElementById(id)?.textContent || '').trim();
-  const bits = {
+  const bits = _metricHost === 'laptop' ? {
+    cpu:     () => [txt('lt-cpu-sub')],
+    ram:     () => [txt('lt-ram-sub')],
+    battery: () => [txt('lt-battery-sub')],
+    power:   () => [txt('lt-power-sub')],
+    temp:    () => ['hottest ACPI thermal zone'],
+    disk:    () => [txt('lt-disk-sub')],
+    net:     () => [],
+  }[view.key === 'net_rx' ? 'net' : view.key] : {
     cpu:   () => [txt('stat-cpu-freq'), txt('stat-load-sub')],
     ram:   () => [txt('stat-ram-detail'), 'Swap ' + txt('stat-swap')],
     swap:  () => [txt('stat-swap-detail')],
@@ -1223,6 +1269,8 @@ function renderMetricDetail(view) {
 function renderMetricAlerts(view, windowStart) {
   const box = document.getElementById('metric-alerts');
   if (!box) return;
+  // Alert rules only run on the Mac's own samples.
+  if (_metricHost === 'laptop') { box.innerHTML = ''; return; }
   const metric = view.alertMetric || (view.key === 'net_rx' ? null : view.key);
   const hits = (_lastAlertEvents || []).filter(e =>
     e.kind !== 'service' && e.metric === metric && (e.ended_at ?? Infinity) >= windowStart);
@@ -1261,9 +1309,10 @@ if (metricOverlay) {
     card.setAttribute('role', 'button');
     card.setAttribute('tabindex', '0');
     card.setAttribute('title', 'Click for the full graph');
-    card.addEventListener('click', () => openMetric(metric));
+    const host = card.dataset.host || 'mac';
+    card.addEventListener('click', () => openMetric(metric, host));
     card.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMetric(metric); }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMetric(metric, host); }
     });
   });
 }
@@ -1369,6 +1418,7 @@ function renderStatsError() {
   const volList = document.getElementById('volumes-list');
   if (volList) volList.innerHTML = '<div class="stat-sub">—</div>';
   setBadgeError('badge-mac');
+  setMachineDot('mac', 'offline');
 }
 
 let usingRealStats = false;
@@ -1379,6 +1429,7 @@ async function fetchAndRenderStats() {
   if (data) {
     renderStats(data);
     setBadgeLive('badge-mac');
+    setMachineDot('mac', 'online');
     usingRealStats = true;
     return true;
   }
@@ -1401,6 +1452,226 @@ setInterval(async () => {
   const ok = await fetchAndRenderStats();
   if (!ok) { usingRealStats = false; renderStatsError(); }
 }, 5000);
+
+/* ── Machine tabs ───────────────────────────────────────────────────
+   The Status section holds one panel per machine; the tab choice is a
+   per-browser convenience, so it lives in localStorage. */
+const MACHINE_KEY = 'homepage_machine_tab';
+
+function showMachine(id) {
+  document.querySelectorAll('.machine-tab').forEach(b => {
+    const on = b.dataset.machine === id;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+    b.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll('[data-machine-panel]').forEach(p => { p.hidden = p.dataset.machinePanel !== id; });
+  document.querySelectorAll('[data-machine-badge]').forEach(b => { b.hidden = b.dataset.machineBadge !== id; });
+  try { localStorage.setItem(MACHINE_KEY, id); } catch {}
+}
+
+// The dot on each tab says whether that machine is up without switching to it.
+function setMachineDot(machine, state) {
+  const dot = document.getElementById('dot-' + machine);
+  if (dot) dot.className = 'tab-dot ' + state;
+}
+
+(() => {
+  const tabs = [...document.querySelectorAll('.machine-tab')];
+  if (!tabs.length) return;
+  tabs.forEach((b, i) => {
+    b.addEventListener('click', () => showMachine(b.dataset.machine));
+    b.addEventListener('keydown', e => {
+      const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+      if (!step) return;
+      const next = tabs[(i + step + tabs.length) % tabs.length];
+      showMachine(next.dataset.machine);
+      next.focus();
+      e.preventDefault();
+    });
+  });
+  let saved = null;
+  try { saved = localStorage.getItem(MACHINE_KEY); } catch {}
+  showMachine(tabs.some(b => b.dataset.machine === saved) ? saved : 'mac');
+})();
+
+/* ─────────────────────────────────────────────────────────────────
+   LAPTOP — samples pushed to the API by laptop-agent/agent.py every
+   30-60 s, so this polls slowly. When the laptop sleeps or leaves, the
+   cards keep its last values (dimmed) and the graphs end at its last sample.
+   ───────────────────────────────────────────────────────────────── */
+const LAPTOP_POLL_MS = 30000;
+const LAPTOP_SPARK_GAP = 150;   // s between samples that counts as a hole (agent ticks at 30-60 s)
+const LAPTOP_SPARKS = ['cpu', 'ram', 'battery', 'power', 'temp', 'disk'];
+let _laptop = null;             // last /api/laptop reply
+const _laptopApps = { minutes: 0, sort: 'cpu', range: null, fetched: 0 };
+
+function fmtMB(mb) {
+  return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : Math.round(mb) + ' MB';
+}
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function renderLaptop(d) {
+  _laptop = d;
+  const last = d.last || {};
+  const info = d.info || {};
+  const pct = v => v != null ? Math.round(v) + '%' : '—';
+
+  setText('lt-cpu', pct(last.cpu));
+  setBar('lt-bar-cpu', last.cpu ?? 0);
+  setText('lt-cpu-sub', [(info.cpu_model || '').replace(/ w\/ .*$/, ''),
+                         info.cpu_threads && `${info.cpu_threads} threads`].filter(Boolean).join(' · '));
+
+  setText('lt-ram', pct(last.ram));
+  setBar('lt-bar-ram', last.ram ?? 0);
+  setText('lt-ram-sub', last.ram_used_gb != null && info.ram_total_gb
+    ? `${last.ram_used_gb.toFixed(1)} / ${info.ram_total_gb} GB` : '');
+
+  // Battery: low is the bad end, so the bar colours itself rather than via setBar.
+  setText('lt-battery', pct(last.battery));
+  const bbar = document.getElementById('lt-bar-battery');
+  if (bbar) {
+    bbar.style.width = (last.battery ?? 0) + '%';
+    bbar.classList.toggle('hot', last.battery != null && last.battery < 30 && last.battery >= 15);
+    bbar.classList.toggle('critical', last.battery != null && last.battery < 15);
+  }
+  const left = last.secsleft ? `${Math.floor(last.secsleft / 3600)}h ${Math.floor(last.secsleft % 3600 / 60)}m left` : '';
+  setText('lt-battery-sub', last.plugged
+    ? (last.charge ? `Charging · ${last.charge.toFixed(1)} W` : 'Plugged in')
+    : ['On battery', left].filter(Boolean).join(' · '));
+
+  // Drain is only measurable on battery - on AC the battery reports charge (or nothing).
+  setText('lt-power', last.power != null ? `${last.power.toFixed(1)} W` : last.plugged ? 'On AC' : '—');
+  setText('lt-power-sub', last.plugged ? 'not measurable while plugged in' : 'watts drawn from the battery');
+
+  const tempEl = document.getElementById('lt-temp');
+  if (tempEl) {
+    tempEl.textContent = last.temp != null ? Math.round(last.temp) + '°C' : 'N/A';
+    tempEl.style.color = last.temp >= 85 ? 'var(--offline)' : last.temp != null && last.temp < 60 ? 'var(--online)' : '';
+  }
+
+  setText('lt-net', last.net_rx != null
+    ? `↑${Math.round(last.net_tx)} ↓${Math.round(last.net_rx)} KB/s` : '—');
+
+  const vols = Array.isArray(info.volumes) ? info.volumes : [];
+  const sys = vols[0];
+  setText('lt-disk', sys ? `${Math.round(sys.percent)}%` : pct(last.disk));
+  setBar('lt-bar-disk', sys ? sys.percent : last.disk ?? 0);
+  setText('lt-disk-sub', vols.map(v => `${v.name} ${Math.round(v.free_gb)} GB free`).join(' · '));
+
+  // Sparklines from the server's fine ring. Asleep = draw up to the last sample.
+  const opts = { gap: LAPTOP_SPARK_GAP, end: d.online ? undefined : last.t };
+  const bufs = {};
+  for (const k of LAPTOP_SPARKS.concat(NET_KEYS)) {
+    bufs[k] = (d.spark || []).filter(p => p[k] != null).map(p => ({ t: p.t, v: Number(p[k]) }));
+  }
+  for (const k of LAPTOP_SPARKS) {
+    const el = document.getElementById('lt-spark-' + k);
+    if (!el) continue;
+    if (bufs[k].length < 2) { el.innerHTML = ''; continue; }
+    drawSparkInto(el, bufs[k], k, opts);
+  }
+  drawNetSparkInto(document.getElementById('lt-spark-net'), bufs.net_rx, bufs.net_tx, opts);
+
+  const panel = document.getElementById('machine-laptop');
+  if (panel) panel.classList.toggle('stale', !d.online);
+  const badge = document.getElementById('badge-laptop');
+  if (d.online) {
+    setBadgeLive('badge-laptop');
+  } else if (badge) {
+    badge.textContent = d.last_push ? `Offline · seen ${fmtAge(d.last_push * 1000)}` : 'Not set up';
+    badge.classList.remove('badge-live', 'badge-error');
+    badge.classList.add('badge-mock');
+  }
+  setMachineDot('laptop', d.online ? 'online' : 'offline');
+  if (_laptopApps.minutes === 0) renderLaptopApps();
+}
+
+function renderLaptopApps() {
+  const list = document.getElementById('lt-apps');
+  const note = document.getElementById('lt-apps-note');
+  if (!list) return;
+  const { minutes, sort, range } = _laptopApps;
+  let rows, noteText;
+  if (minutes === 0) {
+    const now = _laptop && _laptop.apps_now;
+    rows = (now ? now.top : []).map(r => ({ n: r.n, cpu: r.cpu || 0, ram: r.ram || 0 }));
+    noteText = now ? `Last scan at ${alertClock(now.t)}, over ${now.dt}s` : '';
+  } else {
+    if (!range || range.minutes !== minutes) { list.innerHTML = '<div class="stat-sub">Loading…</div>'; return; }
+    rows = range.apps.map(a => ({ n: a.n, cpu: a.cpu, ram: a.ram_avg, peak: a.ram_max }));
+    noteText = range.awake_s
+      ? `Averages over the ${alertDuration(0, range.awake_s)} the laptop was awake in this window`
+      : 'Nothing recorded in this window yet';
+  }
+  rows.sort((a, b) => sort === 'ram' ? b.ram - a.ram : b.cpu - a.cpu);
+  rows = rows.slice(0, 10);
+  const maxCpu = Math.max(0.1, ...rows.map(r => r.cpu));
+  const maxRam = Math.max(1, ...rows.map(r => r.ram));
+  const bar = (cls, v, max) => `<span class="app-bar ${cls}"><i style="width:${(v / max * 100).toFixed(1)}%"></i></span>`;
+  list.innerHTML = rows.length
+    ? `<div class="app-row app-head"><span>App</span><span class="app-col">CPU</span><span class="app-col">RAM</span></div>` +
+      rows.map(r =>
+        `<div class="app-row">` +
+          `<span class="app-name" title="${escapeHtml(r.n)}">${escapeHtml(r.n)}</span>` +
+          `<span class="app-cell">${bar('cpu', r.cpu, maxCpu)}<span class="app-val">${r.cpu < 10 ? r.cpu.toFixed(1) : Math.round(r.cpu)}%</span></span>` +
+          `<span class="app-cell"${r.peak ? ` title="peak ${fmtMB(r.peak)}"` : ''}>${bar('ram', r.ram, maxRam)}<span class="app-val">${fmtMB(r.ram)}</span></span>` +
+        `</div>`).join('')
+    : '<div class="stat-sub">No apps recorded yet</div>';
+  if (note) note.textContent = noteText + (rows.length ? ' · CPU is % of the whole processor' : '');
+}
+
+async function fetchLaptopApps() {
+  const minutes = _laptopApps.minutes;
+  if (!minutes) return renderLaptopApps();
+  const data = await apiFetch(`/api/laptop/apps?minutes=${minutes}`);
+  if (minutes !== _laptopApps.minutes) return;   // the tab changed while this was in flight
+  if (data && Array.isArray(data.apps)) {
+    _laptopApps.range = data;
+    _laptopApps.fetched = Date.now();
+  }
+  renderLaptopApps();
+}
+
+async function fetchAndRenderLaptop() {
+  const data = await apiFetch('/api/laptop');
+  if (!data) {
+    setBadgeError('badge-laptop');
+    setMachineDot('laptop', 'offline');
+    return false;
+  }
+  renderLaptop(data);
+  // The hourly per-app totals only change slowly - refresh them every 5 minutes.
+  if (_laptopApps.minutes && Date.now() - _laptopApps.fetched > 5 * 60 * 1000) fetchLaptopApps();
+  return true;
+}
+
+setInterval(() => { if (document.visibilityState === 'visible') fetchAndRenderLaptop(); }, LAPTOP_POLL_MS);
+
+(() => {
+  const ranges = document.getElementById('lt-app-ranges');
+  const sorts = document.getElementById('lt-app-sort');
+  if (!ranges || !sorts) return;
+  ranges.addEventListener('click', e => {
+    const btn = e.target.closest('.range-btn');
+    if (!btn) return;
+    ranges.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', b === btn));
+    _laptopApps.minutes = Number(btn.dataset.minutes);
+    _laptopApps.range = null;
+    fetchLaptopApps();
+  });
+  sorts.addEventListener('click', e => {
+    const btn = e.target.closest('.range-btn');
+    if (!btn) return;
+    sorts.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', b === btn));
+    _laptopApps.sort = btn.dataset.sort;
+    renderLaptopApps();
+  });
+})();
 
 /* ─────────────────────────────────────────────────────────────────
    SERVICES & PROJECTS STATUS
@@ -2190,6 +2461,7 @@ btnSave.addEventListener('click', async () => {
   await seedSparksFromHistory();
   const statsOk = await fetchAndRenderStats();
   if (!statsOk) renderStatsError();
+  fetchAndRenderLaptop();
 
   // 3. Load service/project statuses (already checked by the server)
   const svcOk = await fetchAndRenderServices();

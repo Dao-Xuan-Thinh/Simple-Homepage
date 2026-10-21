@@ -25,6 +25,13 @@ A personal dashboard hosted on GitHub Pages that provides centralized access to 
 - Also logs **service outages** — the 30s health probe feeds the same episode machinery, so "Immich was down 14:02 → 14:19" lands in the same list as a CPU spike
 - Persisted to `alerts.json` (git-ignored), kept across restarts (last 200). The badge **flashes** when a new alert lands while you're viewing
 
+### ▭ Laptop tab
+- The Status section has one tab per machine: **Mac mini** and **Laptop**, each with a dot showing whether it's up. The chosen tab is remembered per browser
+- The laptop (Windows G14) runs [`laptop-agent/agent.py`](laptop-agent/README.md), which pushes CPU, RAM, battery, battery drain, temperature, network and storage to the Mac's API every 1–2 minutes
+- **Top apps**: which apps used the most CPU and RAM right now, or averaged over the last hour, 24 hours or 7 days (hourly totals, kept 7 days)
+- Same graphs and click-to-expand history (30m–7d) as the Mac's cards. Graphs leave a gap where the laptop slept instead of drawing a line across it
+- While the laptop is asleep or away, its cards keep the last values, dimmed, with "Offline · seen 3h ago"
+
 ### ✨ Homelab console UI
 - Per-metric accent colors, card depth, monospace tabular numbers, soft glow on live values
 - **Five selectable skins** — pick from the header (`◐`) or the command palette; each has light and dark. These are whole designs, not palette swaps: layout, framing, typography and the *form the graphs take* all change
@@ -121,6 +128,11 @@ untick to forget it immediately).
 │  Exposed publicly via Tailscale Funnel TLS             │
 │  https://my-biggest-beefsteak.tail437237.ts.net:8443/  │
 └────────────────────────────────────────────────────────┘
+
+┌─ Laptop (Windows) ─────────────────────────────────────┐
+│  laptop-agent/agent.py  (pushes samples + top apps)    │
+│  → POST /api/laptop/push on the Mac's API              │
+└────────────────────────────────────────────────────────┘
 ```
 
 ### 🔄 Data Flow
@@ -131,7 +143,8 @@ untick to forget it immediately).
 4. **Logs**: Log viewer polls `/api/logs` every 10 seconds → real-time Docker logs displayed
 5. **Alerts**: A server background loop samples metrics every ~20s and records overload episodes to `alerts.json`; the dashboard polls `/api/alerts` every ~30s to show the history
 6. **History**: The same loop records every sample into a fine in-memory ring (~1h) and 5-minute min/avg/max buckets persisted to `history.json` (7 days). The dashboard fetches `/api/history` on load for the 30-minute sparklines and on demand for the expanded 6h/24h/7d views
-7. **Config Changes**: User saves settings → `PUT /api/config` → server writes `config.json` → services re-rendered
+7. **Laptop**: The agent on the laptop samples every 30 s (60 s on battery) and pushes a batch every 1–2 minutes; the server keeps the same history tiers for it plus hourly per-app totals. The dashboard polls `/api/laptop` every 30 s
+8. **Config Changes**: User saves settings → `PUT /api/config` → server writes `config.json` → services re-rendered
 
 ---
 
@@ -416,6 +429,11 @@ The overload event log — episodes where a stat crossed a "dangerous" threshold
 
 ---
 
+#### GET /api/laptop, /api/laptop/apps
+Laptop status (latest sample, info, top apps, 30-minute series) and per-app CPU/RAM averages over a
+window. Add `host=laptop` to `/api/history` for the laptop's graphs. See
+[mac-api/API.md](mac-api/API.md#get-apilaptop).
+
 #### GET /api/history
 Metric history from the same 24/7 loop that feeds `/api/alerts`, in two tiers: **fine** (every ~20s
 sample, ~1h, in memory) and **bucket** (5-minute min/avg/max, 7 days, persisted to `history.json`).
@@ -545,8 +563,12 @@ The script validates the JSON before copying and no-ops if they already match.
 ├── pages/
 │   └── changelog/
 │       └── changelog.html  # Feature history
+├── laptop-agent/
+│   ├── agent.py            # Runs on the Windows laptop, pushes stats to the API
+│   └── README.md           # Install / update / remove
 ├── mac-api/
 │   ├── server.py           # Python API server
+│   ├── laptop.py           # Laptop history + per-app store (imported by server.py)
 │   ├── config.json         # Config template (keep in sync with the live copy)
 │   └── sync-config.sh      # Copy the live config into this repo copy
 └── README.md               # This file

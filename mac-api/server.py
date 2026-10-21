@@ -17,6 +17,10 @@ Endpoints:
     PUT  /api/config?token=<WRITE_TOKEN>      - update config (write, requires write token)
     GET  /api/alerts?limit=100                - overload event log (stats that went dangerously high)
     GET  /api/history?minutes=30[&step=1800]  - metric history (fine samples / 5-min buckets)
+         [&host=laptop]                       - ... of the laptop instead (pushed by laptop-agent)
+    GET  /api/laptop                          - laptop status, latest sample, top apps, 30-min series
+    GET  /api/laptop/apps?minutes=1440        - which apps used the most CPU / RAM over a window
+    POST /api/laptop/push                     - laptop-agent upload (X-Push-Token header)
     GET  /api/logs?service=<id>&lines=50      - last N log lines
 
 CORS is pre-configured for dao-xuan-thinh.github.io and localhost.
@@ -32,6 +36,7 @@ import subprocess
 import threading
 import time
 import os
+import secrets
 import shutil
 import signal
 import urllib.request
@@ -39,6 +44,8 @@ import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+
+from laptop import Laptop
 
 try:
     import psutil
@@ -1386,7 +1393,9 @@ class Handler(BaseHTTPRequestHandler):
                 # Short windows get full-resolution samples; longer ones get the
                 # persisted 5-minute min/avg/max buckets, which have a different point
                 # shape - hence "res" so the client knows what it is drawing.
-                if minutes <= BUCKET_FINE_MAX:
+                if qs.get("host", [""])[0] == "laptop":
+                    points, res, interval = LAPTOP.history(minutes, BUCKET_FINE_MAX)
+                elif minutes <= BUCKET_FINE_MAX:
                     with _history_lock:
                         points = [p for p in _history if p["t"] >= cutoff]
                     res, interval = "fine", ALERT_INTERVAL
@@ -1394,6 +1403,7 @@ class Handler(BaseHTTPRequestHandler):
                     with _history_lock:
                         points = [b for b in _buckets if b["t"] >= cutoff]
                     res, interval = "bucket", BUCKET_SECONDS
+                if res == "bucket":
                     # Optional coarser buckets: a whole multiple of BUCKET_SECONDS, max 1 day.
                     step = int(qs.get("step", [str(BUCKET_SECONDS)])[0])
                     step = max(1, min(step // BUCKET_SECONDS, 288)) * BUCKET_SECONDS
@@ -1405,6 +1415,16 @@ class Handler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 json_response(self, {"error": str(e)}, 500)
+
+        elif path == "/api/laptop":
+            json_response(self, LAPTOP.status())
+
+        elif path == "/api/laptop/apps":
+            try:
+                minutes = max(60, min(int(qs.get("minutes", ["1440"])[0]), 10080))
+                json_response(self, LAPTOP.apps(minutes))
+            except ValueError:
+                json_response(self, {"error": "minutes must be an integer"}, 400)
 
         elif path == "/api/logs":
             service = qs.get("service", ["immich"])[0]
@@ -1426,6 +1446,27 @@ class Handler(BaseHTTPRequestHandler):
 
         else:
             json_response(self, {"error": "Not found"}, 404)
+
+    def do_POST(self):
+        path = urlparse(self.path).path.rstrip("/")
+        if path != "/api/laptop/push":
+            json_response(self, {"error": "Not found"}, 404)
+            return
+        if not secrets.compare_digest(self.headers.get("X-Push-Token", "").encode(), LAPTOP.token.encode()):
+            json_response(self, {"error": "Unauthorized"}, 401)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            if not 0 < length <= 4 * 1024 * 1024:
+                json_response(self, {"error": "Bad length"}, 413)
+                return
+            ok, msg = LAPTOP.ingest(json.loads(self.rfile.read(length).decode("utf-8")))
+            json_response(self, {"ok": ok, "message": msg}, 200 if ok else 400)
+        except (json.JSONDecodeError, ValueError) as e:
+            json_response(self, {"error": f"Bad JSON: {e}"}, 400)
+        except Exception as e:
+            log(f"[laptop] push error: {e}")
+            json_response(self, {"error": str(e)}, 500)
 
     def do_PUT(self):
         parsed = urlparse(self.path)
@@ -1477,6 +1518,7 @@ if __name__ == "__main__":
     # Restore persisted event log + metric history before any thread can touch them.
     load_alerts()
     load_history()
+    LAPTOP = Laptop(os.path.dirname(CONFIG_FILE), log)
 
     # Initial status check + background refresh loop
     print("[status] Running initial status check...")
@@ -1499,3 +1541,4 @@ if __name__ == "__main__":
         save_history_live()
         save_history()
         save_alerts()
+        LAPTOP.save_all()

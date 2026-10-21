@@ -13,3 +13,10 @@ energy.json
 alerts.json
 history.json
 history-live.json
+laptop-live.json
+laptop-history.json
+laptop-apps.json
+laptop-token.txt
+
+# Laptop agent's local config (holds the push token)
+laptop-agent/agent.json
