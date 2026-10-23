@@ -661,7 +661,7 @@ the server adds them into the hour they fall in.
 
 ```json
 {
-  "apps": [ { "n": "chrome", "cpu": 4.12, "ram_avg": 2210, "ram_max": 3105, "seen_s": 18240 } ],
+  "apps": [ { "n": "chrome", "cpu": 4.12, "cpu_run": 5.43, "ram_avg": 2210, "ram_max": 3105, "seen_s": 18240 } ],
   "awake_s": 21600,
   "minutes": 1440
 }
@@ -670,6 +670,7 @@ the server adds them into the hour they fall in.
 | Field | Description |
 |-------|-------------|
 | `cpu` | Average % of the whole processor while the laptop was awake in the window |
+| `cpu_run` | Average % of the whole processor while the app was in the top list (`seen_s`) |
 | `ram_avg` / `ram_max` | Private working set in MB, averaged over / peak across the scans the app appeared in |
 | `seen_s` | Seconds the app was in a scan's top list |
 | `awake_s` | Seconds of scans in the window (the laptop's awake time) |

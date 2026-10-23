@@ -561,17 +561,36 @@ body { --m-battery: var(--m-load); }
 .apps-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; }
 .apps-head .stat-label { margin-right: auto; }
 .apps-head .metric-ranges { margin-bottom: 0; }
+.apps-ranges .range-btn { white-space: nowrap; }
+.apps-note { margin: 0.35rem 0 0.2rem; }
 .apps-list { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.3rem; }
 .app-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
   gap: 0.9rem;
   font-size: 0.8rem;
 }
+.apps-list.ranged .app-row { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) 4.6rem; }
 .app-head { font-size: 0.66rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.app-head > :not(:first-child) { justify-self: end; }
+.app-sort {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0.15rem 0.3rem;
+  margin-right: -0.3rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.app-sort:hover { color: var(--text); background: var(--bar-bg); }
+.app-sort.active { color: var(--text); font-weight: 600; }
 .app-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-.app-cell { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.app-row.sys .app-name { color: var(--text-muted); }
+.app-cell { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; min-width: 0; }
 .app-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--bar-bg); overflow: hidden; }
 .app-bar i { display: block; height: 100%; border-radius: 3px; }
 .app-bar.cpu i { background: var(--m-cpu); }
@@ -585,9 +604,12 @@ body { --m-battery: var(--m-load); }
 }
 
 @media (max-width: 640px) {
-  .app-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.25rem 0.8rem; }
+  .app-row,
+  .apps-list.ranged .app-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.25rem 0.8rem; }
+  .apps-list.ranged .app-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 4.2rem; }
   .app-row .app-name { grid-column: 1 / -1; }
   .app-head > span:first-child { display: none; }
+  .app-bar { display: none; }
 }
 
 /* ── Server Status ─────────────────────────────────────────────── */

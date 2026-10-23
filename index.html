@@ -234,19 +234,15 @@
         <div class="card stat-card apps-card" data-metric="cpu">
           <div class="apps-head">
             <div class="stat-label">Top Apps</div>
-            <div class="metric-ranges apps-ranges" id="lt-app-ranges" role="tablist" aria-label="Window">
+            <div class="metric-ranges apps-ranges" id="lt-app-ranges" role="tablist" aria-label="Time window">
               <button class="range-btn active" data-minutes="0" role="tab">Now</button>
-              <button class="range-btn" data-minutes="60" role="tab">1h</button>
-              <button class="range-btn" data-minutes="1440" role="tab">24h</button>
-              <button class="range-btn" data-minutes="10080" role="tab">7d</button>
-            </div>
-            <div class="metric-ranges apps-sort" id="lt-app-sort" role="tablist" aria-label="Sort by">
-              <button class="range-btn active" data-sort="cpu" role="tab">CPU</button>
-              <button class="range-btn" data-sort="ram" role="tab">RAM</button>
+              <button class="range-btn" data-minutes="60" role="tab">1 hour</button>
+              <button class="range-btn" data-minutes="1440" role="tab">24 hours</button>
+              <button class="range-btn" data-minutes="10080" role="tab">7 days</button>
             </div>
           </div>
+          <div class="stat-sub apps-note" id="lt-apps-note"></div>
           <div class="apps-list" id="lt-apps"><div class="stat-sub">—</div></div>
-          <div class="stat-sub" id="lt-apps-note"></div>
         </div>
 
       </div>

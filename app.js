@@ -1591,6 +1591,37 @@ function renderLaptop(d) {
   if (_laptopApps.minutes === 0) renderLaptopApps();
 }
 
+// Process names as Windows reports them → what a person would call them. `true` marks
+// Windows' own background processes, which render muted. Unknown names show as-is.
+const APP_NAMES = {
+  system: ['Windows kernel', true], dwm: ['Desktop Window Manager', true], audiodg: ['Windows audio', true],
+  svchost: ['Windows services', true], msmpeng: ['Microsoft Defender', true], csrss: ['Windows client runtime', true],
+  lsass: ['Windows sign-in', true], services: ['Windows service manager', true], wininit: ['Windows start-up', true],
+  searchhost: ['Windows Search', true], searchindexer: ['Windows Search indexer', true],
+  runtimebroker: ['Windows app permissions', true], wmiprvse: ['Windows management (WMI)', true],
+  dllhost: ['Windows COM host', true], conhost: ['Console host', true], fontdrvhost: ['Font driver', true],
+  ctfmon: ['Text input', true], sihost: ['Windows shell host', true], taskhostw: ['Windows task host', true],
+  startmenuexperiencehost: ['Start menu', true], shellexperiencehost: ['Windows shell', true],
+  textinputhost: ['Touch keyboard', true], securityhealthservice: ['Windows Security', true],
+  spoolsv: ['Print spooler', true], smss: ['Windows session manager', true], vmmem: ['Virtual machines (WSL)', true],
+  vmmemwsl: ['WSL', true], nvcontainer: ['NVIDIA services', true], nvdisplay: ['NVIDIA display', true],
+  'nvidia overlay': ['NVIDIA overlay', true], rtkauduservice64: ['Realtek audio', true],
+  explorer: ['File Explorer'], taskmgr: ['Task Manager'], systemsettings: ['Settings'],
+  msedge: ['Edge'], msedgewebview2: ['Edge WebView (in-app web views)'], chrome: ['Chrome'], firefox: ['Firefox'],
+  zen: ['Zen Browser'], code: ['VS Code'], idea64: ['IntelliJ IDEA'], windowsterminal: ['Windows Terminal'],
+  powershell: ['PowerShell'], pwsh: ['PowerShell'], python: ['Python'], pythonw: ['Python (background)'],
+  discord: ['Discord'], spotify: ['Spotify'], onedrive: ['OneDrive'], obsidian: ['Obsidian'], claude: ['Claude'],
+  steam: ['Steam'], steamwebhelper: ['Steam (web helper)'], mpv: ['mpv'], 'osu!': ['osu!'],
+  deadlock: ['Deadlock'], limbuscompany: ['Limbus Company'], fluentsearch: ['Fluent Search'],
+  logioptionsplus_agent: ['Logi Options+'], syncthing: ['Syncthing'], tailscaled: ['Tailscale'],
+  everything: ['Everything (file search)'], armourycrate: ['Armoury Crate'], 'tailscale-ipn': ['Tailscale'], 'warp-svc': ['Cloudflare WARP'], rustdesk: ['RustDesk'], ollama: ['Ollama'],
+};
+
+function appLabel(n) {
+  const known = APP_NAMES[n.toLowerCase()];
+  return known ? { name: known[0], sys: !!known[1] } : { name: n, sys: false };
+}
+
 function renderLaptopApps() {
   const list = document.getElementById('lt-apps');
   const note = document.getElementById('lt-apps-note');
@@ -1600,29 +1631,49 @@ function renderLaptopApps() {
   if (minutes === 0) {
     const now = _laptop && _laptop.apps_now;
     rows = (now ? now.top : []).map(r => ({ n: r.n, cpu: r.cpu || 0, ram: r.ram || 0 }));
-    noteText = now ? `Last scan at ${alertClock(now.t)}, over ${now.dt}s` : '';
+    noteText = now ? `What's running as of ${alertClock(now.t)}` : '';
   } else {
     if (!range || range.minutes !== minutes) { list.innerHTML = '<div class="stat-sub">Loading…</div>'; return; }
-    rows = range.apps.map(a => ({ n: a.n, cpu: a.cpu, ram: a.ram_avg, peak: a.ram_max }));
+    // Averages are taken over the time each app was running, so an app that showed up for
+    // a minute would rank on one spike - hide anything active for under 2% of the window.
+    const minSeen = Math.max(120, range.awake_s * 0.02);
+    rows = range.apps.filter(a => a.seen_s >= minSeen)
+      .map(a => ({ n: a.n, cpu: a.cpu_run ?? a.cpu, ram: a.ram_avg, peak: a.ram_max, seen: a.seen_s }));
     noteText = range.awake_s
-      ? `Averages over the ${alertDuration(0, range.awake_s)} the laptop was awake in this window`
+      ? `Average while each app was running · laptop awake ${alertDuration(0, range.awake_s)} of this window`
       : 'Nothing recorded in this window yet';
   }
   rows.sort((a, b) => sort === 'ram' ? b.ram - a.ram : b.cpu - a.cpu);
   rows = rows.slice(0, 10);
-  const maxCpu = Math.max(0.1, ...rows.map(r => r.cpu));
-  const maxRam = Math.max(1, ...rows.map(r => r.ram));
-  const bar = (cls, v, max) => `<span class="app-bar ${cls}"><i style="width:${(v / max * 100).toFixed(1)}%"></i></span>`;
+  const ranged = minutes !== 0;
+  const max = Math.max(sort === 'ram' ? 1 : 0.1, ...rows.map(r => r[sort]));
+  const cpuText = v => (v < 10 ? v.toFixed(1) : Math.round(v)) + '%';
+  // Only the sorted column gets a bar; the other is a plain number.
+  const cell = (key, v, text, title) => {
+    const bar = key === sort
+      ? `<span class="app-bar ${key}"><i style="width:${(v / max * 100).toFixed(1)}%"></i></span>` : '';
+    return `<span class="app-cell"${title ? ` title="${title}"` : ''}>${bar}<span class="app-val">${text}</span></span>`;
+  };
+  const head = (key, label, title) =>
+    `<button class="app-sort${key === sort ? ' active' : ''}" data-sort="${key}" title="${title}">${label}${key === sort ? ' ▾' : ''}</button>`;
+  list.classList.toggle('ranged', ranged);
   list.innerHTML = rows.length
-    ? `<div class="app-row app-head"><span>App</span><span class="app-col">CPU</span><span class="app-col">RAM</span></div>` +
-      rows.map(r =>
-        `<div class="app-row">` +
-          `<span class="app-name" title="${escapeHtml(r.n)}">${escapeHtml(r.n)}</span>` +
-          `<span class="app-cell">${bar('cpu', r.cpu, maxCpu)}<span class="app-val">${r.cpu < 10 ? r.cpu.toFixed(1) : Math.round(r.cpu)}%</span></span>` +
-          `<span class="app-cell"${r.peak ? ` title="peak ${fmtMB(r.peak)}"` : ''}>${bar('ram', r.ram, maxRam)}<span class="app-val">${fmtMB(r.ram)}</span></span>` +
-        `</div>`).join('')
+    ? `<div class="app-row app-head"><span>App</span>` +
+        head('cpu', 'CPU', 'Share of the whole processor, like Task Manager · click to sort') +
+        head('ram', 'RAM', 'Memory the app holds for itself (Task Manager\'s Memory column) · click to sort') +
+        (ranged ? '<span class="app-col" title="How long the app was running in this window">Active</span>' : '') +
+      `</div>` +
+      rows.map(r => {
+        const { name, sys } = appLabel(r.n);
+        return `<div class="app-row${sys ? ' sys' : ''}">` +
+          `<span class="app-name" title="${escapeHtml(r.n)}${sys ? ' · part of Windows' : ''}">${escapeHtml(name)}</span>` +
+          cell('cpu', r.cpu, cpuText(r.cpu)) +
+          cell('ram', r.ram, r.ram ? fmtMB(r.ram) : '—', r.peak ? `peak ${fmtMB(r.peak)}` : '') +
+          (ranged ? `<span class="app-val app-active">${alertDuration(0, Math.round(r.seen))}</span>` : '') +
+        `</div>`;
+      }).join('')
     : '<div class="stat-sub">No apps recorded yet</div>';
-  if (note) note.textContent = noteText + (rows.length ? ' · CPU is % of the whole processor' : '');
+  if (note) note.textContent = noteText;
 }
 
 async function fetchLaptopApps() {
@@ -1654,8 +1705,8 @@ setInterval(() => { if (document.visibilityState === 'visible') fetchAndRenderLa
 
 (() => {
   const ranges = document.getElementById('lt-app-ranges');
-  const sorts = document.getElementById('lt-app-sort');
-  if (!ranges || !sorts) return;
+  const list = document.getElementById('lt-apps');
+  if (!ranges || !list) return;
   ranges.addEventListener('click', e => {
     const btn = e.target.closest('.range-btn');
     if (!btn) return;
@@ -1664,10 +1715,10 @@ setInterval(() => { if (document.visibilityState === 'visible') fetchAndRenderLa
     _laptopApps.range = null;
     fetchLaptopApps();
   });
-  sorts.addEventListener('click', e => {
-    const btn = e.target.closest('.range-btn');
-    if (!btn) return;
-    sorts.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', b === btn));
+  // The CPU / RAM column headers sort the list (they're re-rendered, so delegate).
+  list.addEventListener('click', e => {
+    const btn = e.target.closest('.app-sort');
+    if (!btn || btn.dataset.sort === _laptopApps.sort) return;
     _laptopApps.sort = btn.dataset.sort;
     renderLaptopApps();
   });

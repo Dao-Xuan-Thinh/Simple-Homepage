@@ -257,7 +257,8 @@ class Laptop:
 
     def apps(self, minutes, limit=15):
         """Per-app averages over the window, from the hourly records. cpu = average % of the
-        whole machine while the laptop was awake; ram_avg / ram_max in MB."""
+        whole machine while the laptop was awake, cpu_run = the same while the app was in the
+        top list; ram_avg / ram_max in MB."""
         start = int(time.time()) - minutes * 60
         start -= start % 3600
         totals, seconds = {}, 0
@@ -273,6 +274,7 @@ class Laptop:
                     a[2] = max(a[2], ram_max)
                     a[3] += secs
         rows = [{"n": n, "cpu": round(c / seconds, 2) if seconds else 0,
+                 "cpu_run": round(c / s, 2) if s else 0,
                  "ram_avg": round(r / s) if s else 0, "ram_max": m, "seen_s": s}
                 for n, (c, r, m, s) in totals.items()]
         keep = {r["n"] for r in sorted(rows, key=lambda r: -r["cpu"])[:limit]}
