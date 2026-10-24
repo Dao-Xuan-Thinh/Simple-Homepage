@@ -48,6 +48,9 @@
   --m-load:   #17a99a;
   --m-ram:    #a259e6;
   --m-swap:   #7b8398;
+  /* Laptop OS tints: chart backgrounds and Top Apps tags (see osBands) */
+  --os-windows: #3d8fd9;
+  --os-macos:   #d65db1;
   --m-temp:   #e0952c;
   --m-power:  #22a565;
   --m-disk:   #dd7433;
@@ -76,6 +79,8 @@ body.dark {
   --m-load:   #5ad1c0;
   --m-ram:    #b98cf5;
   --m-swap:   #8a93a8;
+  --os-windows: #5aa9ee;
+  --os-macos:   #e57cc6;
   --m-temp:   #f0a840;
   --m-power:  #3dbb7a;
   --m-disk:   #e8894f;
@@ -590,6 +595,17 @@ body { --m-battery: var(--m-load); }
 .app-sort.active { color: var(--text); font-weight: 600; }
 .app-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .app-row.sys .app-name { color: var(--text-muted); }
+.app-os {
+  --os: var(--text-muted);
+  display: inline-block;
+  margin-right: 0.4rem;
+  padding: 0 0.3rem;
+  border-radius: 4px;
+  font-size: 0.62rem;
+  color: var(--os);
+  background: color-mix(in srgb, var(--os) 14%, transparent);
+  vertical-align: 1px;
+}
 .app-cell { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; min-width: 0; }
 .app-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--bar-bg); overflow: hidden; }
 .app-bar i { display: block; height: 100%; border-radius: 3px; }
@@ -2030,6 +2046,32 @@ body[data-skin="paper"] .card:hover { box-shadow: none; }
   color: var(--text-muted);
   pointer-events: none;
   white-space: nowrap;
+}
+
+/* Which OS the laptop was running, behind each stretch of its charts (see osBands) */
+.chart-os { --os: var(--text-muted); fill: color-mix(in srgb, var(--os) 9%, transparent); stroke: none; }
+.os-windows { --os: var(--os-windows); }
+.os-macos   { --os: var(--os-macos); }
+.chart-os-label {
+  position: absolute;
+  top: 4px;
+  margin-left: 4px;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--os, var(--text-muted));
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.chart-os-key span { color: var(--os); margin-left: 0.5rem; white-space: nowrap; }
+.chart-os-key i {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  margin-right: 0.25rem;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--os) 35%, transparent);
+  vertical-align: -1px;
 }
 
 .chart-times {

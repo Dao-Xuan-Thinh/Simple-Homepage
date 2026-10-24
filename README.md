@@ -27,7 +27,8 @@ A personal dashboard hosted on GitHub Pages that provides centralized access to 
 
 ### ▭ Laptop tab
 - The Status section has one tab per machine: **Mac mini** and **Laptop**, each with a dot showing whether it's up. The chosen tab is remembered per browser
-- The laptop (Windows G14) runs [`laptop-agent/agent.py`](laptop-agent/README.md), which pushes CPU, RAM, battery, battery drain, temperature, network and storage to the Mac's API every 1–2 minutes
+- The laptop (the G14) runs an agent on each OS it boots, [`laptop-agent/agent.py`](laptop-agent/README.md) on Windows and [`laptop-agent/macos/agent.c`](laptop-agent/macos/README.md) on macOS. Each pushes CPU, RAM, battery, battery drain, temperature (Windows only), network and storage to the Mac's API every 1–2 minutes
+- **Which OS**: both OSes share one history, labelled per sample. The badge names the OS the latest stats came from ("macOS · Live"). Expanded charts tint the background by OS, with a colour key underneath, and the hover readout names it. Lines break at an OS switch. Top Apps counts each app per OS and tags rows with their OS when a window mixes both
 - **Top apps**: which apps used the most CPU and RAM right now, or averaged over the last hour, 24 hours or 7 days (hourly totals, kept 7 days)
 - Same graphs and click-to-expand history (30m–7d) as the Mac's cards. Graphs leave a gap where the laptop slept instead of drawing a line across it
 - While the laptop is asleep or away, its cards keep the last values, dimmed, with "Offline · seen 3h ago"

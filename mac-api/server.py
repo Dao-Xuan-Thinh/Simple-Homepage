@@ -649,11 +649,14 @@ def _close_bucket():
 def _coarsen(buckets, step):
     """Merge consecutive 5-minute buckets into step-second groups (min of mins, max of
     maxes, mean of avgs), aligned to wall-clock step boundaries. A 7-day window is 2016
-    buckets - far more points than a chart is wide - so long views ask for e.g. 30 min."""
-    out, cur, slot = [], {}, None
+    buckets - far more points than a chart is wide - so long views ask for e.g. 30 min.
+    Laptop buckets carry "os"; a group never spans two OSes."""
+    out, cur, slot, start, group_os = [], {}, None, None, None
 
     def flush():
-        agg = {"t": slot}
+        agg = {"t": start}
+        if group_os:
+            agg["os"] = group_os
         for metric, parts in cur.items():
             agg[metric] = {
                 "min": min(p["min"] for p in parts),
@@ -664,10 +667,12 @@ def _coarsen(buckets, step):
 
     for b in buckets:
         s = b["t"] - (b["t"] % step)
-        if s != slot:
+        if s != slot or b.get("os") != group_os:
             if cur:
                 flush()
-            cur, slot = {}, s
+            # An OS switch mid-group starts the new group at its first bucket.
+            start = s if s != slot else b["t"]
+            cur, slot, group_os = {}, s, b.get("os")
         for metric, val in b.items():
             if metric != "t" and isinstance(val, dict):
                 cur.setdefault(metric, []).append(val)

@@ -796,12 +796,13 @@ function drawSparkInto(el, buf, key, opts = {}) {
    rendered as text. Each form takes the same scaled geometry. */
 // Splits a time-ordered series wherever consecutive points are more than `gap` seconds
 // apart, so a machine that slept (or an API that was down) leaves a hole in the graph
-// instead of a straight line across it. No gap given = one segment.
+// instead of a straight line across it. No gap given = one segment. Laptop points also
+// carry `os`, and a reboot into another OS always breaks the line.
 function splitGaps(pts, gap) {
   if (!gap || pts.length < 2) return [pts];
   const segs = [[pts[0]]];
   for (let i = 1; i < pts.length; i++) {
-    if (pts[i].t - pts[i - 1].t > gap) segs.push([]);
+    if (pts[i].t - pts[i - 1].t > gap || pts[i].os !== pts[i - 1].os) segs.push([]);
     segs[segs.length - 1].push(pts[i]);
   }
   return segs;
@@ -954,7 +955,7 @@ async function loadMetricRange() {
 
 function renderBigChart(chart, points, key, pick, bucketS, gap) {
   const bucketed = bucketS > 0;
-  const series = points.map(p => ({ t: p.t, s: pick(p, key) })).filter(p => p.s);
+  const series = points.map(p => ({ t: p.t, os: p.os, s: pick(p, key) })).filter(p => p.s);
   if (series.length < 2) {
     chart.innerHTML = '<div class="metric-loading">No data for this metric in this window.</div>';
     return;
@@ -981,6 +982,7 @@ function renderBigChart(chart, points, key, pick, bucketS, gap) {
   const x = t => ((t - t0) / span) * W;
   const y = v => H - ((v - lo) / (hi - lo)) * H;
   const days = dayMarks(t0, t1, x, W, H);
+  const os = osBands(series, x, W, H);
   const pt = (p, v) => `${x(p.t).toFixed(1)},${y(v).toFixed(1)}`;
   let band = '', traces = '';
   for (const seg of splitGaps(series, gap)) {
@@ -1000,16 +1002,16 @@ function renderBigChart(chart, points, key, pick, bucketS, gap) {
   chart.innerHTML =
     `<div class="chart-box">` +
       `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
-        days.lines + band + traces +
+        os.rects + days.lines + band + traces +
       `</svg>` +
       `<span class="axis-hi">${cfg.fmt(hi)}</span>` +
-      `<span class="axis-lo">${cfg.fmt(lo)}</span>` + days.labels +
-    `</div>` + chartTimes(t0, t1) +
+      `<span class="axis-lo">${cfg.fmt(lo)}</span>` + days.labels + os.labels +
+    `</div>` + chartTimes(t0, t1) + os.legend +
     (bucketed ? `<div class="chart-note">Shaded band = min–max within each ${bucketLabel(bucketS)} bucket</div>` : '');
 
   attachChartHover(chart.querySelector('.chart-box'), series.map(p => ({
     x: x(p.t),
-    when: hoverWhen(p.t, bucketS),
+    when: hoverWhen(p.t, bucketS, p.os),
     marks: [{
       cls: '', y: y(p.s.avg), value: cfg.fmt(p.s.avg), label: bucketed ? 'avg' : '',
       range: bucketed ? hoverRange(cfg.fmt, p.s) : '',
@@ -1019,8 +1021,8 @@ function renderBigChart(chart, points, key, pick, bucketS, gap) {
 
 function renderBigNetChart(chart, points, pick, bucketS, gap) {
   const bucketed = bucketS > 0;
-  const rx = points.map(p => ({ t: p.t, s: pick(p, 'net_rx') })).filter(p => p.s);
-  const tx = points.map(p => ({ t: p.t, s: pick(p, 'net_tx') })).filter(p => p.s);
+  const rx = points.map(p => ({ t: p.t, os: p.os, s: pick(p, 'net_rx') })).filter(p => p.s);
+  const tx = points.map(p => ({ t: p.t, os: p.os, s: pick(p, 'net_tx') })).filter(p => p.s);
   if (rx.length < 2 && tx.length < 2) {
     chart.innerHTML = '<div class="metric-loading">No network samples in this window yet.</div>';
     return;
@@ -1035,6 +1037,7 @@ function renderBigNetChart(chart, points, pick, bucketS, gap) {
 
   const x = t => ((t - t0) / span) * W;
   const days = dayMarks(t0, t1, x, W, H);
+  const os = osBands(points.filter(p => p.t >= t0 && p.t <= t1), x, W, H);
   // dir +1 draws upward from the midline, -1 downward.
   const yAt = (v, dir) => MID - dir * (v / scale) * (MID - 1);
   const trace = (pts, dir) => splitGaps(pts, gap).map(seg => {
@@ -1049,14 +1052,14 @@ function renderBigNetChart(chart, points, pick, bucketS, gap) {
   chart.innerHTML =
     `<div class="chart-box">` +
       `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">` +
-        days.lines +
+        os.rects + days.lines +
         `<g class="net-rx">${trace(rx, 1)}</g>` +
         `<g class="net-tx">${trace(tx, -1)}</g>` +
         `<line class="spark-mid" x1="0" y1="${MID}" x2="${W}" y2="${MID}" vector-effect="non-scaling-stroke"></line>` +
       `</svg>` +
       `<span class="axis-hi">↓ ${fmtRate(peakRx)}</span>` +
-      `<span class="axis-lo">↑ ${fmtRate(peakTx)}</span>` + days.labels +
-    `</div>` + chartTimes(t0, t1);
+      `<span class="axis-lo">↑ ${fmtRate(peakTx)}</span>` + days.labels + os.labels +
+    `</div>` + chartTimes(t0, t1) + os.legend;
 
   const mark = (s, dir, cls, label) => s && {
     cls, label, y: yAt(s.avg, dir), value: fmtRate(s.avg),
@@ -1065,7 +1068,7 @@ function renderBigNetChart(chart, points, pick, bucketS, gap) {
   attachChartHover(chart.querySelector('.chart-box'), points.map(p => {
     const marks = [mark(pick(p, 'net_rx'), 1, 'net-rx', '↓ down'),
                    mark(pick(p, 'net_tx'), -1, 'net-tx', '↑ up')].filter(Boolean);
-    return marks.length && { x: x(p.t), when: hoverWhen(p.t, bucketS), marks };
+    return marks.length && { x: x(p.t), when: hoverWhen(p.t, bucketS, p.os), marks };
   }).filter(Boolean), W, H);
 }
 
@@ -1075,10 +1078,43 @@ function renderBigNetChart(chart, points, pick, bucketS, gap) {
    (preserveAspectRatio="none"), so the overlay is plain HTML placed in
    percentages of the viewBox rather than drawn inside the SVG. Each stop is
    { x, when, marks: [{ cls, y, value, label, range }] } in viewBox units. */
-function hoverWhen(t, bucketS) {
+function hoverWhen(t, bucketS, os) {
   const day = alertSameDay(t) ? '' : alertDate(t) + ' ';
-  if (bucketS) return `${day}${alertClock(t)} – ${alertClock(t + bucketS)}`;
-  return day + new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const where = os ? ` · ${osName(os)}` : '';
+  if (bucketS) return `${day}${alertClock(t)} – ${alertClock(t + bucketS)}${where}`;
+  return day + new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + where;
+}
+
+// The laptop boots several OSes into one history; each point says which one sent it.
+const OS_NAMES = { windows: 'Windows', macos: 'macOS', linux: 'Linux' };
+function osName(key) {
+  return OS_NAMES[key] || (key ? key[0].toUpperCase() + key.slice(1) : '');
+}
+
+// A tinted background behind each stretch of the chart that one OS recorded, named at
+// the top. A stretch runs until the next OS's first point. Mac points carry no os, so
+// its charts get nothing.
+function osBands(points, x, W, H) {
+  const runs = [];
+  for (const p of points) {
+    if (!p.os) continue;
+    if (!runs.length || runs[runs.length - 1].os !== p.os) runs.push({ os: p.os, t: p.t });
+  }
+  let rects = '', labels = '';
+  runs.forEach((r, i) => {
+    const x0 = Math.max(0, x(r.t)), x1 = i + 1 < runs.length ? x(runs[i + 1].t) : W;
+    const cls = `os-${escapeHtml(r.os)}`;
+    rects += `<rect class="chart-os ${cls}" x="${x0.toFixed(1)}" y="0" width="${Math.max(x1 - x0, 0).toFixed(1)}" height="${H}"></rect>`;
+    // Skip names that wouldn't fit; the hover readout still says which OS it was.
+    if ((x1 - x0) / W < 0.12) return;
+    const pct = Math.min(Math.max((x0 / W) * 100, 8), 88);
+    labels += `<span class="chart-os-label ${cls}" style="left:${pct.toFixed(2)}%">${escapeHtml(osName(r.os))}</span>`;
+  });
+  // A key under the chart, since a short stretch is too narrow to carry its name.
+  const seen = [...new Set(runs.map(r => r.os))];
+  const legend = seen.length ? `<div class="chart-note chart-os-key">Background = OS running: ` +
+    seen.map(o => `<span class="os-${escapeHtml(o)}"><i></i>${escapeHtml(osName(o))}</span>`).join(' ') + `</div>` : '';
+  return { rects, labels, legend };
 }
 
 // "5-minute", "30-minute", "1-hour" - how long one bucketed point spans.
@@ -1567,7 +1603,7 @@ function renderLaptop(d) {
   const opts = { gap: LAPTOP_SPARK_GAP, end: d.online ? undefined : last.t };
   const bufs = {};
   for (const k of LAPTOP_SPARKS.concat(NET_KEYS)) {
-    bufs[k] = (d.spark || []).filter(p => p[k] != null).map(p => ({ t: p.t, v: Number(p[k]) }));
+    bufs[k] = (d.spark || []).filter(p => p[k] != null).map(p => ({ t: p.t, os: p.os, v: Number(p[k]) }));
   }
   for (const k of LAPTOP_SPARKS) {
     const el = document.getElementById('lt-spark-' + k);
@@ -1579,14 +1615,18 @@ function renderLaptop(d) {
 
   const panel = document.getElementById('machine-laptop');
   if (panel) panel.classList.toggle('stale', !d.online);
+  // The laptop dual-boots: the badge names the OS the latest stats came from.
   const badge = document.getElementById('badge-laptop');
+  const os = d.os ? osName(d.os) + ' · ' : '';
   if (d.online) {
     setBadgeLive('badge-laptop');
+    if (badge) badge.textContent = os + 'Live';
   } else if (badge) {
-    badge.textContent = d.last_push ? `Offline · seen ${fmtAge(d.last_push * 1000)}` : 'Not set up';
+    badge.textContent = d.last_push ? `${os}Offline · seen ${fmtAge(d.last_push * 1000)}` : 'Not set up';
     badge.classList.remove('badge-live', 'badge-error');
     badge.classList.add('badge-mock');
   }
+  if (badge) badge.title = info.os || '';
   setMachineDot('laptop', d.online ? 'online' : 'offline');
   if (_laptopApps.minutes === 0) renderLaptopApps();
 }
@@ -1617,7 +1657,27 @@ const APP_NAMES = {
   everything: ['Everything (file search)'], armourycrate: ['Armoury Crate'], 'tailscale-ipn': ['Tailscale'], 'warp-svc': ['Cloudflare WARP'], rustdesk: ['RustDesk'], ollama: ['Ollama'],
 };
 
-function appLabel(n) {
+// macOS: the agent already groups helpers under their .app, so names mostly read fine.
+// What's left to mute is the OS itself - its named services and the lowercase daemons.
+const MAC_APP_NAMES = {
+  kernel_task: ['macOS kernel', true], windowserver: ['Window server', true], windowmanager: ['Stage Manager', true],
+  launchd: ['launchd', true], mds: ['Spotlight indexer', true], mds_stores: ['Spotlight indexer', true],
+  mdworker_shared: ['Spotlight indexer', true], spotlight: ['Spotlight', true], controlcenter: ['Control Center', true],
+  dock: ['Dock', true], loginwindow: ['Login window', true], securityagent: ['Security agent', true],
+  xprotect: ['XProtect', true], appleidsettings: ['Apple ID settings', true],
+  mtlcompilerservice: ['Metal shader compiler', true], vtdecoderxpcservice: ['Video decoder', true],
+  wallpaperimageextension: ['Wallpaper', true], wallpaperextension: ['Wallpaper', true],
+  wallpapervideoextension: ['Wallpaper', true], contextstoreagent: ['macOS context store', true],
+  uvfsservice: ['File system service', true], 'system settings': ['System Settings'],
+  'io.tailscale.ipn.macsys.network': ['Tailscale'],
+};
+
+function appLabel(n, os) {
+  if (os === 'macos') {
+    const known = MAC_APP_NAMES[n.toLowerCase()];
+    if (known) return { name: known[0], sys: !!known[1] };
+    return { name: n, sys: /^[a-z]/.test(n) || n.startsWith('com.apple.') };
+  }
   const known = APP_NAMES[n.toLowerCase()];
   return known ? { name: known[0], sys: !!known[1] } : { name: n, sys: false };
 }
@@ -1630,22 +1690,30 @@ function renderLaptopApps() {
   let rows, noteText;
   if (minutes === 0) {
     const now = _laptop && _laptop.apps_now;
-    rows = (now ? now.top : []).map(r => ({ n: r.n, cpu: r.cpu || 0, ram: r.ram || 0 }));
-    noteText = now ? `What's running as of ${alertClock(now.t)}` : '';
+    rows = (now ? now.top : []).map(r => ({ n: r.n, os: now.os, cpu: r.cpu || 0, ram: r.ram || 0 }));
+    noteText = now ? `What's running${now.os ? ' on ' + osName(now.os) : ''} as of ${alertClock(now.t)}` : '';
   } else {
     if (!range || range.minutes !== minutes) { list.innerHTML = '<div class="stat-sub">Loading…</div>'; return; }
     // Averages are taken over the time each app was running, so an app that showed up for
-    // a minute would rank on one spike - hide anything active for under 2% of the window.
-    const minSeen = Math.max(120, range.awake_s * 0.02);
-    rows = range.apps.filter(a => a.seen_s >= minSeen)
-      .map(a => ({ n: a.n, cpu: a.cpu_run ?? a.cpu, ram: a.ram_avg, peak: a.ram_max, seen: a.seen_s }));
+    // a minute would rank on one spike - hide anything active for under 2% of the time its
+    // OS was up.
+    const awakeOs = range.awake_os || {};
+    const minSeen = a => Math.max(120, (awakeOs[a.os] ?? range.awake_s) * 0.02);
+    rows = range.apps.filter(a => a.seen_s >= minSeen(a))
+      .map(a => ({ n: a.n, os: a.os, cpu: a.cpu_run ?? a.cpu, ram: a.ram_avg, peak: a.ram_max, seen: a.seen_s }));
+    const perOs = Object.entries(awakeOs).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]);
+    const split = perOs.length > 1
+      ? ` (${perOs.map(([o, s]) => `${osName(o)} ${alertDuration(0, Math.round(s))}`).join(', ')})`
+      : perOs.length ? ` on ${osName(perOs[0][0])}` : '';
     noteText = range.awake_s
-      ? `Average while each app was running · laptop awake ${alertDuration(0, range.awake_s)} of this window`
+      ? `Average while each app was running · laptop awake ${alertDuration(0, Math.round(range.awake_s))}${split} of this window`
       : 'Nothing recorded in this window yet';
   }
   rows.sort((a, b) => sort === 'ram' ? b.ram - a.ram : b.cpu - a.cpu);
   rows = rows.slice(0, 10);
   const ranged = minutes !== 0;
+  // Only tag rows with their OS when the list mixes more than one.
+  const mixed = new Set(rows.map(r => r.os)).size > 1;
   const max = Math.max(sort === 'ram' ? 1 : 0.1, ...rows.map(r => r[sort]));
   const cpuText = v => (v < 10 ? v.toFixed(1) : Math.round(v)) + '%';
   // Only the sorted column gets a bar; the other is a plain number.
@@ -1659,14 +1727,16 @@ function renderLaptopApps() {
   list.classList.toggle('ranged', ranged);
   list.innerHTML = rows.length
     ? `<div class="app-row app-head"><span>App</span>` +
-        head('cpu', 'CPU', 'Share of the whole processor, like Task Manager · click to sort') +
-        head('ram', 'RAM', 'Memory the app holds for itself (Task Manager\'s Memory column) · click to sort') +
+        head('cpu', 'CPU', 'Share of the whole processor, like Task Manager / Activity Monitor · click to sort') +
+        head('ram', 'RAM', 'Memory the app holds for itself (the Memory column in Task Manager / Activity Monitor) · click to sort') +
         (ranged ? '<span class="app-col" title="How long the app was running in this window">Active</span>' : '') +
       `</div>` +
       rows.map(r => {
-        const { name, sys } = appLabel(r.n);
+        const { name, sys } = appLabel(r.n, r.os);
+        const os = osName(r.os);
+        const tag = mixed && r.os ? `<span class="app-os os-${escapeHtml(r.os)}">${escapeHtml(os)}</span>` : '';
         return `<div class="app-row${sys ? ' sys' : ''}">` +
-          `<span class="app-name" title="${escapeHtml(r.n)}${sys ? ' · part of Windows' : ''}">${escapeHtml(name)}</span>` +
+          `<span class="app-name" title="${escapeHtml(r.n)}${sys && os ? ` · part of ${escapeHtml(os)}` : ''}">${tag}${escapeHtml(name)}</span>` +
           cell('cpu', r.cpu, cpuText(r.cpu)) +
           cell('ram', r.ram, r.ram ? fmtMB(r.ram) : '—', r.peak ? `peak ${fmtMB(r.peak)}` : '') +
           (ranged ? `<span class="app-val app-active">${alertDuration(0, Math.round(r.seen))}</span>` : '') +

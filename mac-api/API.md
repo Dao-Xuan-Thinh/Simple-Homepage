@@ -554,7 +554,7 @@ The tier is chosen from the requested window: **≤ 60 minutes returns `fine`, a
 |-----------|------|---------|-------------|
 | `minutes` | int | 30 | How far back to return samples (1–10080, i.e. up to 7 days) |
 | `step` | int | 300 | `bucket` tier only: merge buckets into groups of this many seconds (rounded down to a multiple of 300, max 86400). Each group is min of mins, max of maxes, mean of avgs, aligned to wall-clock boundaries. Ignored for `fine` |
-| `host` | string | (Mac) | `laptop` returns the laptop's history instead (see [GET /api/laptop](#get-apilaptop)). Same tiers and shapes; its `fine` interval is 30 (the agent samples every 30 s on AC, 60 s on battery) and gaps are normal while it sleeps |
+| `host` | string | (Mac) | `laptop` returns the laptop's history instead (see [GET /api/laptop](#get-apilaptop)). Same tiers and shapes; its `fine` interval is 30 (the agent samples every 30 s on AC, 60 s on battery) and gaps are normal while it sleeps. Every point also has `os`; coarsened groups (`step`) never span two OSes, so a group cut short by an OS switch starts at its first bucket rather than on the step boundary |
 | `token` | string | (required) | API read token |
 
 **Response — `fine` (200 OK):** scalar values.
@@ -609,9 +609,12 @@ leave a gap. The bucketed windows are fetched on demand when a card is expanded.
 
 ### GET /api/laptop
 
-Status of the Windows laptop, which is not sampled by this server: `laptop-agent/agent.py` runs on
-the laptop and pushes batches to [POST /api/laptop/push](#post-apilaptoppush). Everything here is the
-laptop's own data, timestamped by the laptop.
+Status of the laptop, which is not sampled by this server. The laptop boots more than one OS, and
+each runs its own agent (`laptop-agent/agent.py` on Windows, `laptop-agent/macos/agent.c` on macOS)
+that pushes batches to [POST /api/laptop/push](#post-apilaptoppush). Everything here is the laptop's
+own data, timestamped by the laptop. All OSes share one history, and every sample, bucket and app
+record carries `os` (`"windows"`, `"macos"`, …, the first word of `info.os` lowercased) naming the OS
+that sent it.
 
 **URL**: `/api/laptop?token=<TOKEN>`
 
@@ -621,15 +624,16 @@ laptop's own data, timestamped by the laptop.
 {
   "online": true,
   "last_push": 1792605084,
-  "last": { "t": 1792605084, "cpu": 6.2, "ram": 48.1, "ram_used_gb": 14.97, "swap": 1.7,
+  "os": "windows",
+  "last": { "t": 1792605084, "os": "windows", "cpu": 6.2, "ram": 48.1, "ram_used_gb": 14.97, "swap": 1.7,
             "disk": 76.0, "temp": 57.1, "battery": 100, "plugged": 1, "net_rx": 6.3, "net_tx": 2.4 },
   "info": { "hostname": "Shatter", "os": "Windows 11 (10.0.26200)",
             "cpu_model": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M", "cpu_threads": 24, "cpu_cores": 12,
             "ram_total_gb": 31.1, "boot_time": 1792314514, "agent_version": 1,
             "volumes": [ { "name": "C:", "percent": 75.9, "free_gb": 158.9, "total_gb": 660.0 } ] },
-  "apps_now": { "t": 1792605084, "dt": 30,
+  "apps_now": { "t": 1792605084, "dt": 30, "os": "windows",
                 "top": [ { "n": "msedgewebview2", "cpu": 1.86, "ram": 989 } ] },
-  "spark": [ { "t": 1792603300, "cpu": 5.1, "ram": 47.9 } ],
+  "spark": [ { "t": 1792603300, "os": "windows", "cpu": 5.1, "ram": 47.9 } ],
   "ts": 1792605090
 }
 ```
@@ -637,8 +641,9 @@ laptop's own data, timestamped by the laptop.
 | Field | Description |
 |-------|-------------|
 | `online` | A push arrived within the last 5 minutes. When `false` the laptop is asleep, off or away, and every other field is its last known state |
-| `last` | Newest sample. `cpu`/`ram`/`swap`/`disk`/`battery` are percentages; `temp` is the hottest ACPI thermal zone (°C); `net_rx`/`net_tx` KB/s. `power` (W drawn from the battery) is present only while discharging, `charge` (W into the battery) only while charging; the draw from the charger itself is not measurable. `secsleft` is Windows' battery estimate, on battery only |
-| `apps_now` | The latest per-app scan: `cpu` = % of the **whole** processor over the `dt` seconds since the previous scan (all of an app's processes summed), `ram` = private working set in MB (Task Manager's "Memory") |
+| `os` | The OS the latest push came from (from `info.os`) |
+| `last` | Newest sample. `cpu`/`ram`/`swap`/`disk`/`battery` are percentages; `temp` is the hottest ACPI thermal zone (°C); `net_rx`/`net_tx` KB/s. `power` (W drawn from the battery) is present only while discharging, `charge` (W into the battery) only while charging; the draw from the charger itself is not measurable. `secsleft` is the OS's battery estimate, on battery only. macOS sends no `temp` |
+| `apps_now` | The latest per-app scan: `cpu` = % of the **whole** processor over the `dt` seconds since the previous scan (all of an app's processes summed), `ram` = private working set in MB on Windows (Task Manager's "Memory"), physical footprint on macOS (Activity Monitor's "Memory") |
 | `spark` | Fine samples covering the 30 minutes up to the newest one (not up to now), for the card graphs |
 
 Any field of a sample may be absent if the laptop couldn't read it.
@@ -649,7 +654,7 @@ Any field of a sample may be absent if the laptop couldn't read it.
 
 Which apps used the most CPU and memory on the laptop over a window, from hourly totals kept for
 7 days in `laptop-apps.json`. Each scan from the agent carries the top 10 apps by CPU and by RAM;
-the server adds them into the hour they fall in.
+the server adds them into the hour they fall in, per OS. An app that ran on two OSes is two rows.
 
 **URL**: `/api/laptop/apps?minutes=1440&token=<TOKEN>`
 
@@ -661,19 +666,22 @@ the server adds them into the hour they fall in.
 
 ```json
 {
-  "apps": [ { "n": "chrome", "cpu": 4.12, "cpu_run": 5.43, "ram_avg": 2210, "ram_max": 3105, "seen_s": 18240 } ],
+  "apps": [ { "n": "chrome", "os": "windows", "cpu": 4.12, "cpu_run": 5.43, "ram_avg": 2210, "ram_max": 3105, "seen_s": 18240 } ],
   "awake_s": 21600,
+  "awake_os": { "windows": 18000, "macos": 3600 },
   "minutes": 1440
 }
 ```
 
 | Field | Description |
 |-------|-------------|
-| `cpu` | Average % of the whole processor while the laptop was awake in the window |
+| `os` | The OS the app ran on |
+| `cpu` | Average % of the whole processor while that OS was awake in the window |
 | `cpu_run` | Average % of the whole processor while the app was in the top list (`seen_s`) |
 | `ram_avg` / `ram_max` | Private working set in MB, averaged over / peak across the scans the app appeared in |
 | `seen_s` | Seconds the app was in a scan's top list |
 | `awake_s` | Seconds of scans in the window (the laptop's awake time) |
+| `awake_os` | The same, split by OS |
 
 At most the top 15 apps by CPU plus the top 15 by memory are returned, unsorted.
 
@@ -692,7 +700,9 @@ header (not the read token). Body (max 4 MB):
 }
 ```
 
-Samples and scans already received (by timestamp) are skipped, so the agent can safely resend a batch
+`info.os` names the OS for every sample and scan in the push, so agents send `info` every time. Switching
+OS closes the open 5-minute bucket early, so a bucket never mixes two OSes. Samples and scans already
+received (by timestamp) are skipped, so the agent can safely resend a batch
 whose reply it never got. Returns `{"ok": true, "message": "ok"}`, `400` for a malformed body, `401`
 for a wrong token.
 
