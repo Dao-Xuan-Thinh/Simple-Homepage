@@ -42,7 +42,7 @@ import signal
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 from laptop import Laptop
@@ -1509,7 +1509,10 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     # Bind to 127.0.0.1 - Tailscale Funnel connects from localhost.
     # This blocks direct Tailscale-IP connections that cause TLS noise in the log.
-    server = HTTPServer(("127.0.0.1", PORT), Handler)
+    # Threaded: /api/stats and /api/docker take ~2 s each, and served one at a time
+    # they queued past the page's 5 s timeout, so the Mac flickered "offline".
+    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    server.daemon_threads = True
 
     print(f"Mac Mini Stats API running on port {PORT} (plain HTTP - TLS handled by Tailscale Funnel)")
     print(f"  API token:   {API_TOKEN}")
