@@ -1675,7 +1675,7 @@ const MAC_APP_NAMES = {
 // Linux (CachyOS on Hyprland): the agent names apps by their program file. Mute the OS
 // plumbing; anything unknown falls through to the Windows map, then shows as-is.
 const LINUX_APP_NAMES = {
-  kernel: ['Linux kernel', true], systemd: ['systemd', true], 'systemd-journal': ['System journal', true],
+  kernel: ['Linux kernel', true], systemd: ['systemd', true], 'systemd-journald': ['System journal', true],
   'systemd-oomd': ['Out-of-memory killer', true], 'systemd-logind': ['Login manager', true],
   'systemd-udevd': ['Device manager', true], 'systemd-resolved': ['DNS resolver', true],
   networkmanager: ['NetworkManager', true], 'dbus-broker': ['D-Bus', true], 'dbus-daemon': ['D-Bus', true],
@@ -1688,7 +1688,7 @@ const LINUX_APP_NAMES = {
 function appLabel(n, os) {
   if (os === 'cachyos' || os === 'linux') {
     const known = LINUX_APP_NAMES[n.toLowerCase()] || APP_NAMES[n.toLowerCase()];
-    return known ? { name: known[0], sys: !!known[1] } : { name: n, sys: false };
+    return known ? { name: known[0], sys: !!known[1] } : { name: n, sys: /^(systemd-|udev)/.test(n) };
   }
   if (os === 'macos') {
     const known = MAC_APP_NAMES[n.toLowerCase()];
