@@ -51,6 +51,7 @@
   /* Laptop OS tints: chart backgrounds and Top Apps tags (see osBands) */
   --os-windows: #3d8fd9;
   --os-macos:   #d65db1;
+  --os-cachyos: #14a88f;
   --m-temp:   #e0952c;
   --m-power:  #22a565;
   --m-disk:   #dd7433;
@@ -81,6 +82,7 @@ body.dark {
   --m-swap:   #8a93a8;
   --os-windows: #5aa9ee;
   --os-macos:   #e57cc6;
+  --os-cachyos: #2fc7ab;
   --m-temp:   #f0a840;
   --m-power:  #3dbb7a;
   --m-disk:   #e8894f;
@@ -2052,6 +2054,7 @@ body[data-skin="paper"] .card:hover { box-shadow: none; }
 .chart-os { --os: var(--text-muted); fill: color-mix(in srgb, var(--os) 9%, transparent); stroke: none; }
 .os-windows { --os: var(--os-windows); }
 .os-macos   { --os: var(--os-macos); }
+.os-cachyos { --os: var(--os-cachyos); }
 .chart-os-label {
   position: absolute;
   top: 4px;

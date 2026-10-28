@@ -1,0 +1,21 @@
+[Unit]
+Description=Homepage laptop agent (pushes stats to the Mac mini)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -I /usr/local/lib/homepage-agent/agent.py
+Restart=always
+RestartSec=30
+# Root so it sees every process; kept at idle priority so it never competes with anything.
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+MemoryMax=64M
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

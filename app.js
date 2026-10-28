@@ -1086,7 +1086,7 @@ function hoverWhen(t, bucketS, os) {
 }
 
 // The laptop boots several OSes into one history; each point says which one sent it.
-const OS_NAMES = { windows: 'Windows', macos: 'macOS', linux: 'Linux' };
+const OS_NAMES = { windows: 'Windows', macos: 'macOS', linux: 'Linux', cachyos: 'CachyOS' };
 function osName(key) {
   return OS_NAMES[key] || (key ? key[0].toUpperCase() + key.slice(1) : '');
 }
@@ -1672,7 +1672,24 @@ const MAC_APP_NAMES = {
   'io.tailscale.ipn.macsys.network': ['Tailscale'],
 };
 
+// Linux (CachyOS on Hyprland): the agent names apps by their program file. Mute the OS
+// plumbing; anything unknown falls through to the Windows map, then shows as-is.
+const LINUX_APP_NAMES = {
+  kernel: ['Linux kernel', true], systemd: ['systemd', true], 'systemd-journal': ['System journal', true],
+  'systemd-oomd': ['Out-of-memory killer', true], 'systemd-logind': ['Login manager', true],
+  'systemd-udevd': ['Device manager', true], 'systemd-resolved': ['DNS resolver', true],
+  networkmanager: ['NetworkManager', true], 'dbus-broker': ['D-Bus', true], 'dbus-daemon': ['D-Bus', true],
+  hyprland: ['Hyprland (compositor)', true], xwayland: ['Xwayland', true], noctalia: ['Noctalia shell'],
+  fcitx5: ['Fcitx5 input', true], pipewire: ['PipeWire audio', true], wireplumber: ['PipeWire audio', true],
+  'pipewire-pulse': ['PipeWire audio', true], snapperd: ['Snapper snapshots', true], kitty: ['Kitty'],
+  kitten: ['Kitty helper'], 'zen-bin': ['Zen Browser'], firefox: ['Firefox'], 'agent.py': ['Homepage agent', true],
+};
+
 function appLabel(n, os) {
+  if (os === 'cachyos' || os === 'linux') {
+    const known = LINUX_APP_NAMES[n.toLowerCase()] || APP_NAMES[n.toLowerCase()];
+    return known ? { name: known[0], sys: !!known[1] } : { name: n, sys: false };
+  }
   if (os === 'macos') {
     const known = MAC_APP_NAMES[n.toLowerCase()];
     if (known) return { name: known[0], sys: !!known[1] };
